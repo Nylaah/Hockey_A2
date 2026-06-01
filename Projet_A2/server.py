@@ -4,19 +4,31 @@ import threading
 HOST = "10.30.43.9"
 PORT = 5000
 
-clients = {}       # conn -> username
+clients = {}        # conn -> username
 lock = threading.Lock()
 connection_count = 0
 
 
-def broadcast(message, sender_conn=None):
+def send(conn, message: str):
+    try:
+        conn.sendall((message + "\n").encode("utf-8"))
+    except:
+        pass
+
+
+def broadcast(message: str, sender_conn=None):
+    """Envoie à tous sauf l'expéditeur."""
     with lock:
         for conn in clients:
             if conn != sender_conn:
-                try:
-                    conn.sendall((message + "\n").encode("utf-8"))
-                except:
-                    pass
+                send(conn, message)
+
+
+def broadcast_all(message: str):
+    """Envoie à tous les clients connectés."""
+    with lock:
+        for conn in clients:
+            send(conn, message)
 
 
 def handle_client(conn, addr):
@@ -27,24 +39,29 @@ def handle_client(conn, addr):
         username = conn.recv(1024).decode("utf-8").strip()
 
         if username == "":
-            conn.sendall("USERNAME_REFUSED Pseudo vide interdit\n".encode())
+            send(conn, "USERNAME_REFUSED Pseudo vide interdit")
             conn.close()
             return
 
         with lock:
             if username in clients.values():
-                conn.sendall("USERNAME_REFUSED Pseudo déjà utilisé\n".encode())
+                send(conn, "USERNAME_REFUSED Pseudo déjà utilisé")
                 conn.close()
                 return
             clients[conn] = username
             role = "LEFT" if connection_count == 0 else "RIGHT"
             connection_count += 1
+            current_count = connection_count
 
-        conn.sendall("USERNAME_ACCEPTED\n".encode())
-        conn.sendall(f"ROLE {role}\n".encode())
-
+        send(conn, "USERNAME_ACCEPTED")
+        send(conn, f"ROLE {role}")
         print(f"[+] {username} connecté ({role}) depuis {addr}")
         broadcast(f"SERVER {username} a rejoint la partie", conn)
+
+        # Quand 2 joueurs sont là, la partie peut commencer
+        if current_count == 2:
+            print("[*] 2 joueurs connectés — GAME_START")
+            broadcast_all("GAME_START")
 
         buf = ""
         while True:
@@ -77,10 +94,8 @@ server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind((HOST, PORT))
 server.listen()
-
-print(f"Server listening on {HOST}:{PORT}")
+print(f"Serveur en écoute sur {HOST}:{PORT}")
 
 while True:
     conn, addr = server.accept()
-    thread = threading.Thread(target=handle_client, args=(conn, addr), daemon=True)
-    thread.start()
+    threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
