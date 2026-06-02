@@ -1,7 +1,21 @@
 import socket
 import threading
 
-HOST = "10.30.43.9"
+
+
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # Pas besoin que Google soit joignable, ça sert juste à choisir la bonne interface réseau
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = "127.0.0.1"
+    finally:
+        s.close()
+    return ip
+
+HOST = get_local_ip()
 PORT = 5000
 
 clients = {}        # conn -> username
