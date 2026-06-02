@@ -274,12 +274,46 @@ def screen_wait(screen, clock, WIDTH, HEIGHT, username, role,
 #  Boucle de JEU
 # ─────────────────────────────────────────────
 
+COLLISION_RADIUS = 45   # rayon de collision (px) — un peu plus grand que le triangle
+
+
+def apply_collision(x1, y1, vx1, vy1, x2, y2, vx2, vy2):
+    """
+    Collision élastique en masse égale : retourne la nouvelle vitesse du joueur 1.
+    Le plus rapide repousse fort le plus lent ; même vitesse → rebond symétrique.
+    """
+    dx   = x1 - x2
+    dy   = y1 - y2
+    dist = math.hypot(dx, dy)
+    if dist == 0:
+        return vx1, vy1
+
+    # Normale de collision (de 2 vers 1)
+    nx = dx / dist
+    ny = dy / dist
+
+    # Composantes de vitesse le long de la normale
+    v1n = vx1 * nx + vy1 * ny
+    v2n = vx2 * nx + vy2 * ny
+
+    # Si les deux s'éloignent déjà, pas d'impulsion
+    if v1n - v2n > 0:
+        return vx1, vy1
+
+    # Échange des composantes normales (collision élastique, masses égales)
+    dvn = v2n - v1n                    # impulsion reçue
+    new_vx1 = vx1 + dvn * nx
+    new_vy1 = vy1 + dvn * ny
+    return new_vx1, new_vy1
+
+
 def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
                 incoming, incoming_lock):
     """
     Espace virtuel : 2 × WIDTH de large, HEIGHT de haut.
     La caméra est centrée sur le triangle du joueur local.
     Chaque joueur contrôle toujours son propre triangle.
+    Collision élastique locale basée sur la dernière vitesse connue de l'adversaire.
     """
     font_ui = pygame.font.SysFont("Arial", 18)
 
@@ -293,17 +327,20 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
     vx, vy        = 150.0, 0.0
     angle_control = 0.0
 
-    other: dict   = {"x": None, "y": None, "angle": 0.0}
-    send_timer    = 0.0
+    other: dict = {"x": None, "y": None, "angle": 0.0, "vx": 0.0, "vy": 0.0}
+    send_timer  = 0.0
+
+    # Flash visuel à la collision
+    hit_flash   = 0.0   # secondes restantes de flash
 
     def world_to_screen(wx, cam_x):
-        """Convertit une coordonnée virtuelle en coordonnée écran."""
         return wx - cam_x
 
     running = True
     while running:
         dt = clock.tick(60) / 1000.0
         send_timer += dt
+        hit_flash   = max(0.0, hit_flash - dt)
 
         # ── Messages réseau ──
         with incoming_lock:
@@ -313,17 +350,20 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
         for msg in msgs:
             content = msg.split(": ", 1)[1] if ": " in msg else msg
             parts   = content.split()
-            if len(parts) >= 4 and parts[0] == "POS":
+            # Format : POS x y angle vx vy
+            if len(parts) >= 6 and parts[0] == "POS":
                 other["x"]     = float(parts[1])
                 other["y"]     = float(parts[2])
                 other["angle"] = float(parts[3])
+                other["vx"]    = float(parts[4])
+                other["vy"]    = float(parts[5])
 
         # ── Événements ──
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
 
-        # ── Contrôles (toujours actifs) ──
+        # ── Contrôles ──
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT]:
             angle_control -= physics.TURN_SPEED * dt
@@ -334,29 +374,48 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
             x, y, vx, vy, angle_control, bool(keys[pygame.K_UP]), dt
         )
 
-        # Rebonds sur les murs du monde virtuel
+        # ── Collision avec l'autre triangle ──
+        if other["x"] is not None:
+            dist = math.hypot(x - other["x"], y - other["y"])
+            if dist < COLLISION_RADIUS:
+                # Séparation : pousser mon triangle hors de la zone de collision
+                if dist > 0:
+                    overlap = COLLISION_RADIUS - dist
+                    nx_sep  = (x - other["x"]) / dist
+                    ny_sep  = (y - other["y"]) / dist
+                    x += nx_sep * overlap * 0.5
+                    y += ny_sep * overlap * 0.5
+
+                # Impulsion élastique
+                vx, vy = apply_collision(
+                    x, y, vx, vy,
+                    other["x"], other["y"], other["vx"], other["vy"]
+                )
+                hit_flash = 0.12   # flash blanc 120 ms
+
+        # ── Rebonds sur les murs ──
         if x < 0:           x = 0.0;            vx =  abs(vx)
         elif x > VWIDTH:    x = float(VWIDTH);   vx = -abs(vx)
         if y < 0:           y = 0.0;            vy =  abs(vy)
         elif y > HEIGHT:    y = float(HEIGHT);   vy = -abs(vy)
 
-        # Envoi de position ~30×/s
+        # ── Envoi de position + vitesse ~30×/s ──
         if send_timer >= 1 / 30:
-            sock.sendall(f"POS {x} {y} {angle_control}\n".encode())
+            sock.sendall(f"POS {x} {y} {angle_control} {vx} {vy}\n".encode())
             send_timer = 0.0
 
-        # ── Caméra centrée sur mon triangle ──
+        # ── Caméra ──
         cam_x = x - WIDTH / 2
 
         # ── Rendu ──
         screen.fill((30, 30, 30))
 
-        # Mur gauche du monde
+        # Mur gauche
         lw = int(world_to_screen(0, cam_x))
         if 0 <= lw <= WIDTH:
             pygame.draw.line(screen, (100, 100, 120), (lw, 0), (lw, HEIGHT), 3)
 
-        # Mur droit du monde
+        # Mur droit
         rw = int(world_to_screen(VWIDTH, cam_x))
         if 0 <= rw <= WIDTH:
             pygame.draw.line(screen, (100, 100, 120), (rw, 0), (rw, HEIGHT), 3)
@@ -368,18 +427,21 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
                 pygame.draw.line(screen, (70, 70, 90),
                                  (cl, i), (cl, min(i + 10, HEIGHT)), 1)
 
-        # Mon triangle
-        draw_arrow(screen, world_to_screen(x, cam_x), y, angle_control, my_color)
+        # Couleur de mon triangle (blanc pendant le flash de collision)
+        tri_color = (255, 255, 255) if hit_flash > 0 else my_color
 
-        # Triangle de l'autre joueur
+        draw_arrow(screen, world_to_screen(x, cam_x), y, angle_control, tri_color)
+
         if other["x"] is not None:
             draw_arrow(screen,
                        world_to_screen(other["x"], cam_x),
                        other["y"], other["angle"], other_color)
 
-        # Légende
-        me_lbl  = font_ui.render("● Toi",        True, my_color)
-        adv_lbl = font_ui.render("● Adversaire", True, other_color)
+        # Légende + vitesses
+        my_speed    = math.hypot(vx, vy)
+        other_speed = math.hypot(other["vx"], other["vy"])
+        me_lbl  = font_ui.render(f"● Toi        {my_speed:5.0f} px/s", True, my_color)
+        adv_lbl = font_ui.render(f"● Adversaire {other_speed:5.0f} px/s", True, other_color)
         screen.blit(me_lbl,  (10, HEIGHT - 50))
         screen.blit(adv_lbl, (10, HEIGHT - 28))
 
