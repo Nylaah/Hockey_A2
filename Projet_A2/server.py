@@ -18,7 +18,8 @@ def get_local_ip():
 HOST = get_local_ip()
 PORT = 5000
 
-clients = {}        # conn -> username
+clients    = {}     # conn -> username
+roles_map  = {}     # conn -> {"role": ..., "username": ...}
 lock = threading.Lock()
 connection_count = 0
 
@@ -50,7 +51,13 @@ def handle_client(conn, addr):
     username = None
 
     try:
-        username = conn.recv(1024).decode("utf-8").strip()
+        # Format reçu : "username|ROLE_DESIRE\n" (ex: "Alice|RIGHT\n")
+        raw = conn.recv(1024).decode("utf-8").strip()
+        if "|" in raw:
+            username, desired_role = raw.split("|", 1)
+            desired_role = desired_role.upper()
+        else:
+            username, desired_role = raw, None
 
         if username == "":
             send(conn, "USERNAME_REFUSED Pseudo vide interdit")
@@ -62,10 +69,22 @@ def handle_client(conn, addr):
                 send(conn, "USERNAME_REFUSED Pseudo déjà utilisé")
                 conn.close()
                 return
-            clients[conn] = username
-            role = "LEFT" if connection_count == 0 else "RIGHT"
+
+            # Rôles déjà pris
+            taken = set(clients.values())  # pas les rôles, mais on track autrement
+            taken_roles = {meta["role"] for meta in roles_map.values()}
+
+            if desired_role in ("LEFT", "RIGHT") and desired_role not in taken_roles:
+                role = desired_role
+            elif "LEFT" not in taken_roles:
+                role = "LEFT"
+            else:
+                role = "RIGHT"
+
+            clients[conn]    = username
+            roles_map[conn]  = {"role": role, "username": username}
             connection_count += 1
-            current_count = connection_count
+            current_count    = connection_count
 
         send(conn, "USERNAME_ACCEPTED")
         send(conn, f"ROLE {role}")
@@ -99,6 +118,7 @@ def handle_client(conn, addr):
             if conn in clients:
                 left_username = clients[conn]
                 del clients[conn]
+                roles_map.pop(conn, None)
                 print(f"[-] {left_username} déconnecté")
                 broadcast(f"SERVER {left_username} a quitté la partie")
         conn.close()

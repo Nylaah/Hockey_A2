@@ -2,6 +2,7 @@ import pygame
 import math
 import socket
 import threading
+import time
 import Physics as physics
 
 PORT = 5000
@@ -27,14 +28,42 @@ def draw_arrow(surface, x, y, angle, color):
 #  Utilitaires réseau
 # ─────────────────────────────────────────────
 
-def recv_line(sock):
-    buf = ""
-    while "\n" not in buf:
-        chunk = sock.recv(1024).decode("utf-8")
-        if not chunk:
-            break
-        buf += chunk
-    return buf.split("\n")[0].strip()
+def make_receive_loop(sock, incoming, incoming_lock):
+    """
+    Lance un thread qui lit en continu le socket et met chaque ligne
+    dans la file `incoming`. Retourne la fonction stop() pour l'arrêter.
+    """
+    def loop():
+        buf = ""
+        while True:
+            try:
+                data = sock.recv(4096).decode("utf-8")
+                if not data:
+                    break
+                buf += data
+                while "\n" in buf:
+                    line, buf = buf.split("\n", 1)
+                    line = line.strip()
+                    if line:
+                        with incoming_lock:
+                            incoming.append(line)
+            except:
+                break
+
+    t = threading.Thread(target=loop, daemon=True)
+    t.start()
+    return t
+
+
+def wait_message(incoming, incoming_lock, timeout=10):
+    """Attend et retourne le prochain message de la file (bloquant)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with incoming_lock:
+            if incoming:
+                return incoming.pop(0)
+        time.sleep(0.01)
+    return None
 
 
 # ─────────────────────────────────────────────
@@ -377,19 +406,27 @@ def main():
     pygame.display.set_caption(f"Puck Master — {username} ({role})")
 
     # ── Connexion TCP ──
+    incoming      = []
+    incoming_lock = threading.Lock()
+
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(5)
         sock.connect((server_ip, PORT))
         sock.settimeout(None)
-        sock.sendall(username.encode("utf-8"))
 
-        response = recv_line(sock)
-        if response.startswith("USERNAME_REFUSED"):
-            raise ConnectionError(response)
+        # Thread réseau lancé AVANT l'envoi pour ne perdre aucune ligne
+        make_receive_loop(sock, incoming, incoming_lock)
 
-        role_msg      = recv_line(sock)
-        assigned_role = role_msg.split()[1] if role_msg.startswith("ROLE") else role
+        # Envoie "username|ROLE_DESIRE" pour que le serveur respecte le choix
+        sock.sendall(f"{username}|{role}\n".encode("utf-8"))
+
+        response = wait_message(incoming, incoming_lock)
+        if response is None or response.startswith("USERNAME_REFUSED"):
+            raise ConnectionError(response or "Pas de réponse du serveur")
+
+        role_msg      = wait_message(incoming, incoming_lock)
+        assigned_role = role_msg.split()[1] if role_msg and role_msg.startswith("ROLE") else role
 
     except Exception as e:
         font = pygame.font.SysFont("Arial", 24)
@@ -399,27 +436,6 @@ def main():
         pygame.display.flip()
         pygame.time.wait(4000)
         pygame.quit(); return
-
-    # ── Thread réseau ──
-    incoming      = []
-    incoming_lock = threading.Lock()
-
-    def receive_loop():
-        buf = ""
-        while True:
-            try:
-                data = sock.recv(4096).decode("utf-8")
-                if not data: break
-                buf += data
-                while "\n" in buf:
-                    line, buf = buf.split("\n", 1)
-                    line = line.strip()
-                    if line:
-                        with incoming_lock:
-                            incoming.append(line)
-            except: break
-
-    threading.Thread(target=receive_loop, daemon=True).start()
 
     # ── Attente du 2e joueur ──
     ok = screen_wait(screen, clock, WIDTH, HEIGHT, username, assigned_role,
