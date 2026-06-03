@@ -322,6 +322,23 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
     my_color    = COLOR_LEFT  if role == "LEFT"  else COLOR_RIGHT
     other_color = COLOR_RIGHT if role == "LEFT"  else COLOR_LEFT
 
+    # ── Chargement et mise à l'échelle du terrain ──
+    terrain_surf = None
+    terrain_vx   = 0.0   # coordonnée virtuelle du bord gauche du terrain
+    try:
+        import os
+        terrain_path = os.path.join(os.path.dirname(__file__), "terrain.png")
+        raw = pygame.image.load(terrain_path).convert()
+        # Mise à l'échelle : hauteur = HEIGHT, largeur proportionnelle
+        scale        = HEIGHT / raw.get_height()
+        t_w          = int(raw.get_width()  * scale)
+        t_h          = HEIGHT
+        terrain_surf = pygame.transform.scale(raw, (t_w, t_h))
+        # On centre l'image sur la ligne virtuelle x = WIDTH
+        terrain_vx   = WIDTH - t_w / 2
+    except Exception as e:
+        print(f"[terrain] impossible de charger terrain.png : {e}")
+
     x  = WIDTH / 4         if role == "LEFT" else WIDTH + WIDTH * 3 / 4
     y  = HEIGHT / 2
     vx, vy        = 150.0, 0.0
@@ -373,6 +390,12 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
         x, y, vx, vy, _ = physics.update_physics(
             x, y, vx, vy, angle_control, bool(keys[pygame.K_UP]), dt
         )
+        if keys[pygame.K_DOWN]:
+            speed = math.hypot(vx, vy)
+            if speed > 0:
+                brake_strength = min(300 * dt, speed)  
+                vx -= (vx / speed) * brake_strength
+                vy -= (vy / speed) * brake_strength
 
         # ── Collision avec l'autre triangle ──
         if other["x"] is not None:
@@ -410,6 +433,10 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
         # ── Rendu ──
         screen.fill((30, 30, 30))
 
+        # Terrain centré sur la ligne virtuelle x = WIDTH
+        if terrain_surf is not None:
+            screen.blit(terrain_surf, (int(world_to_screen(terrain_vx, cam_x)), 0))
+
         # Mur gauche
         lw = int(world_to_screen(0, cam_x))
         if 0 <= lw <= WIDTH:
@@ -419,13 +446,6 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
         rw = int(world_to_screen(VWIDTH, cam_x))
         if 0 <= rw <= WIDTH:
             pygame.draw.line(screen, (100, 100, 120), (rw, 0), (rw, HEIGHT), 3)
-
-        # Frontière centrale (pointillés)
-        cl = int(world_to_screen(WIDTH, cam_x))
-        if 0 <= cl <= WIDTH:
-            for i in range(0, HEIGHT, 20):
-                pygame.draw.line(screen, (70, 70, 90),
-                                 (cl, i), (cl, min(i + 10, HEIGHT)), 1)
 
         # Couleur de mon triangle (blanc pendant le flash de collision)
         tri_color = (255, 255, 255) if hit_flash > 0 else my_color
