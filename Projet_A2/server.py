@@ -132,7 +132,8 @@ def _score_point(scorer: str):
 def ball_loop():
     """Boucle ~30 fps : met à jour la balle et détecte les touches."""
     global ball_flight, last_toucher
-    last_t = _time.time()
+    last_t        = _time.time()
+    remind_timer  = 0.0   # réémet SERVE_TURN périodiquement si balle pas en jeu
 
     while True:
         _time.sleep(1 / 30)
@@ -143,7 +144,14 @@ def ball_loop():
         with game_lock:
             flight = ball_flight
             if flight is None:
+                # Rappel toutes les secondes : le client a peut-être raté le premier envoi
+                remind_timer += dt
+                if remind_timer >= 1.0 and game_started:
+                    broadcast_all(f"SCORE {scores['LEFT']} {scores['RIGHT']}")
+                    broadcast_all(f"SERVE_TURN {server_role}")
+                    remind_timer = 0.0
                 continue
+            remind_timer = 0.0
 
             flight.update(dt)
 

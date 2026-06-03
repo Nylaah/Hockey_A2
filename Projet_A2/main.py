@@ -396,8 +396,9 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
 
     x  = WIDTH / 4         if role == "LEFT" else WIDTH + WIDTH * 3 / 4
     y  = HEIGHT / 2
-    vx, vy        = 150.0, 0.0
-    angle_control = 0.0
+    vx, vy        = 0.0, 0.0
+    # LEFT fait face à droite (angle 0), RIGHT fait face à gauche (angle π)
+    angle_control = 0.0 if role == "LEFT" else math.pi
 
     other: dict        = {"x": None, "y": None, "angle": 0.0, "vx": 0.0, "vy": 0.0}
     send_timer         = 0.0
