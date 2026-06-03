@@ -281,37 +281,7 @@ def screen_wait(screen, clock, WIDTH, HEIGHT, username, role,
 #  Boucle de JEU
 # ─────────────────────────────────────────────
 
-COLLISION_RADIUS = 45   # rayon de collision (px) — un peu plus grand que le triangle
-
-
-def apply_collision(x1, y1, vx1, vy1, x2, y2, vx2, vy2):
-    """
-    Collision élastique en masse égale : retourne la nouvelle vitesse du joueur 1.
-    Le plus rapide repousse fort le plus lent ; même vitesse → rebond symétrique.
-    """
-    dx   = x1 - x2
-    dy   = y1 - y2
-    dist = math.hypot(dx, dy)
-    if dist == 0:
-        return vx1, vy1
-
-    # Normale de collision (de 2 vers 1)
-    nx = dx / dist
-    ny = dy / dist
-
-    # Composantes de vitesse le long de la normale
-    v1n = vx1 * nx + vy1 * ny
-    v2n = vx2 * nx + vy2 * ny
-
-    # Si les deux s'éloignent déjà, pas d'impulsion
-    if v1n - v2n > 0:
-        return vx1, vy1
-
-    # Échange des composantes normales (collision élastique, masses égales)
-    dvn = v2n - v1n                    # impulsion reçue
-    new_vx1 = vx1 + dvn * nx
-    new_vy1 = vy1 + dvn * ny
-    return new_vx1, new_vy1
+COLLISION_RADIUS = 45   # rayon de collision (px)
 
 
 def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
@@ -363,11 +333,10 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
     vx, vy        = 150.0, 0.0
     angle_control = 0.0
 
-    other: dict = {"x": None, "y": None, "angle": 0.0, "vx": 0.0, "vy": 0.0}
-    send_timer  = 0.0
-
-    # Flash visuel à la collision
-    hit_flash   = 0.0   # secondes restantes de flash
+    other: dict        = {"x": None, "y": None, "angle": 0.0, "vx": 0.0, "vy": 0.0}
+    send_timer         = 0.0
+    hit_flash          = 0.0   # flash blanc sur collision
+    collision_cooldown = 0.0   # évite de re-déclencher immédiatement
 
     def world_to_screen(wx, cam_x):
         return wx - cam_x
@@ -375,8 +344,9 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
     running = True
     while running:
         dt = clock.tick(60) / 1000.0
-        send_timer += dt
-        hit_flash   = max(0.0, hit_flash - dt)
+        send_timer         += dt
+        hit_flash           = max(0.0, hit_flash - dt)
+        collision_cooldown  = max(0.0, collision_cooldown - dt)
 
         # ── Messages réseau ──
         with incoming_lock:
@@ -393,6 +363,12 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
                 other["angle"] = float(parts[3])
                 other["vx"]    = float(parts[4])
                 other["vy"]    = float(parts[5])
+            # Impulsion envoyée par l'autre joueur quand il nous percute
+            elif len(parts) >= 3 and parts[0] == "IMPULSE":
+                vx += float(parts[1])
+                vy += float(parts[2])
+                hit_flash         = 0.15
+                collision_cooldown = 0.15
 
         # ── Événements ──
         for event in pygame.event.get():
@@ -417,23 +393,38 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
                 vy -= (vy / speed) * brake_strength
 
         # ── Collision avec l'autre triangle ──
-        if other["x"] is not None:
+        if other["x"] is not None and collision_cooldown <= 0:
             dist = math.hypot(x - other["x"], y - other["y"])
-            if dist < COLLISION_RADIUS:
-                # Séparation : pousser mon triangle hors de la zone de collision
-                if dist > 0:
-                    overlap = COLLISION_RADIUS - dist
-                    nx_sep  = (x - other["x"]) / dist
-                    ny_sep  = (y - other["y"]) / dist
-                    x += nx_sep * overlap * 0.5
-                    y += ny_sep * overlap * 0.5
+            if dist < COLLISION_RADIUS and dist > 0:
+                # Normale de collision : de l'autre vers moi
+                nx_c = (x - other["x"]) / dist
+                ny_c = (y - other["y"]) / dist
 
-                # Impulsion élastique
-                vx, vy = apply_collision(
-                    x, y, vx, vy,
-                    other["x"], other["y"], other["vx"], other["vy"]
-                )
-                hit_flash = 0.12   # flash blanc 120 ms
+                # Vitesse relative le long de la normale
+                vrel_n = (vx - other["vx"]) * nx_c + (vy - other["vy"]) * ny_c
+
+                if vrel_n < 0:   # on se rapproche
+                    # e = 1.5 : super-élastique → le plus rapide repousse fort le plus lent
+                    e = 1.5
+                    j = -(1 + e) / 2 * vrel_n   # j > 0
+
+                    # Ma propre réaction (je ralentis / rebondis)
+                    vx += j * nx_c
+                    vy += j * ny_c
+
+                    # J'envoie l'impulsion opposée à l'autre joueur
+                    # (il l'appliquera à sa propre vitesse dès réception)
+                    sock.sendall(
+                        f"IMPULSE {-j * nx_c:.4f} {-j * ny_c:.4f}\n".encode()
+                    )
+
+                    hit_flash          = 0.15
+                    collision_cooldown = 0.15
+
+                # Séparation pour éviter le chevauchement
+                overlap = COLLISION_RADIUS - dist
+                x += nx_c * overlap * 0.5
+                y += ny_c * overlap * 0.5
 
         # ── Rebonds sur les murs ──
         if x < 0:           x = 0.0;            vx =  abs(vx)
