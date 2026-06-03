@@ -250,9 +250,22 @@ def screen_wait(screen, clock, WIDTH, HEIGHT, username, role,
         with incoming_lock:
             msgs = incoming[:]
             incoming.clear()
+
+        leftover = []
+        game_start_found = False
         for msg in msgs:
             if "GAME_START" in msg:
-                return True
+                game_start_found = True
+            else:
+                # Conserver tous les autres messages pour la boucle de jeu
+                leftover.append(msg)
+
+        if leftover:
+            with incoming_lock:
+                incoming[:0] = leftover   # réinsère en tête de file
+
+        if game_start_found:
+            return True
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
