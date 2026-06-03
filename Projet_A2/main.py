@@ -331,13 +331,30 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
     # ── Chargement du terrain ──
     # Étirement à VWIDTH × HEIGHT : rapport VWIDTH/IMG_ORIGINAL_W = TERRAIN_SCALE (entier)
     terrain_surf = None
+    bg_color     = (30, 30, 30)   # fallback si pas de terrain
     try:
         import os
         terrain_path = os.path.join(os.path.dirname(__file__), "terrain.png")
         raw          = pygame.image.load(terrain_path).convert()
         terrain_surf = pygame.transform.scale(raw, (VWIDTH, HEIGHT))
-        print(f"[terrain] {raw.get_width()}×{raw.get_height()} → {VWIDTH}×{HEIGHT}  "
-              f"(rapport entier x{TERRAIN_SCALE})")
+
+        # ── Couleur de fond = moyenne des pixels de bordure du terrain ──
+        # On lit directement sur l'image originale (plus rapide, pixels non étirés)
+        pw, ph = raw.get_width(), raw.get_height()
+        border_pixels = []
+        step = 4   # on ne prend qu'1 pixel sur 4 pour aller vite
+        for bx in range(0, pw, step):          # bord haut et bas
+            border_pixels.append(raw.get_at((bx, 0))[:3])
+            border_pixels.append(raw.get_at((bx, ph - 1))[:3])
+        for by in range(0, ph, step):          # bord gauche et droit
+            border_pixels.append(raw.get_at((0, by))[:3])
+            border_pixels.append(raw.get_at((pw - 1, by))[:3])
+
+        r = int(sum(p[0] for p in border_pixels) / len(border_pixels))
+        g = int(sum(p[1] for p in border_pixels) / len(border_pixels))
+        b = int(sum(p[2] for p in border_pixels) / len(border_pixels))
+        bg_color = (r, g, b)
+        print(f"[terrain] {pw}×{ph} → {VWIDTH}×{HEIGHT}  bg={bg_color}")
     except Exception as e:
         print(f"[terrain] impossible de charger terrain.png : {e}")
 
@@ -433,7 +450,7 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
         cam_x = x - WIDTH / 2
 
         # ── Rendu ──
-        screen.fill((30, 30, 30))
+        screen.fill(bg_color)
 
         # Terrain : bord gauche à virtual x=0, couvre tout le monde virtuel
         if terrain_surf is not None:
