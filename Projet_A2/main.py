@@ -433,6 +433,10 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
             if not parts:
                 continue
 
+            # DEBUG — affiche tout sauf les POS (trop fréquents)
+            if parts[0] != "POS":
+                print(f"[CLIENT {role}] msg={content!r}  my_serve={my_serve}")
+
             if parts[0] == "POS" and len(parts) >= 6:
                 other["x"]     = float(parts[1])
                 other["y"]     = float(parts[2])
