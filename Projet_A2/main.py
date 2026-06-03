@@ -7,6 +7,13 @@ import Physics as physics
 
 PORT = 5000
 
+# ── Dimensions de l'espace virtuel ──────────────────────────────────────────
+# Image terrain : 740×444 px.  On l'étire à k × 740  par  HEIGHT pour garder
+# un rapport entier (k=2) entre VWIDTH et la largeur originale de l'image.
+IMG_ORIGINAL_W = 740
+TERRAIN_SCALE  = 2                        # rapport entier souhaité
+VWIDTH         = IMG_ORIGINAL_W * TERRAIN_SCALE   # = 1480 px
+
 # Couleurs des joueurs
 COLOR_LEFT  = (59,  130, 246)   # bleu  → joueur LEFT
 COLOR_RIGHT = (239,  68,  68)   # rouge → joueur RIGHT
@@ -317,25 +324,20 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
     """
     font_ui = pygame.font.SysFont("Arial", 18)
 
-    VWIDTH = WIDTH * 2
-
+    # VWIDTH défini globalement (IMG_ORIGINAL_W * TERRAIN_SCALE)
     my_color    = COLOR_LEFT  if role == "LEFT"  else COLOR_RIGHT
     other_color = COLOR_RIGHT if role == "LEFT"  else COLOR_LEFT
 
-    # ── Chargement et mise à l'échelle du terrain ──
+    # ── Chargement du terrain ──
+    # Étirement à VWIDTH × HEIGHT : rapport VWIDTH/IMG_ORIGINAL_W = TERRAIN_SCALE (entier)
     terrain_surf = None
-    terrain_vx   = 0.0   # coordonnée virtuelle du bord gauche du terrain
     try:
         import os
         terrain_path = os.path.join(os.path.dirname(__file__), "terrain.png")
-        raw = pygame.image.load(terrain_path).convert()
-        # Mise à l'échelle : hauteur = HEIGHT, largeur proportionnelle
-        scale        = HEIGHT / raw.get_height()
-        t_w          = int(raw.get_width()  * scale)
-        t_h          = HEIGHT
-        terrain_surf = pygame.transform.scale(raw, (t_w, t_h))
-        # On centre l'image sur la ligne virtuelle x = WIDTH
-        terrain_vx   = WIDTH - t_w / 2
+        raw          = pygame.image.load(terrain_path).convert()
+        terrain_surf = pygame.transform.scale(raw, (VWIDTH, HEIGHT))
+        print(f"[terrain] {raw.get_width()}×{raw.get_height()} → {VWIDTH}×{HEIGHT}  "
+              f"(rapport entier x{TERRAIN_SCALE})")
     except Exception as e:
         print(f"[terrain] impossible de charger terrain.png : {e}")
 
@@ -433,9 +435,9 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
         # ── Rendu ──
         screen.fill((30, 30, 30))
 
-        # Terrain centré sur la ligne virtuelle x = WIDTH
+        # Terrain : bord gauche à virtual x=0, couvre tout le monde virtuel
         if terrain_surf is not None:
-            screen.blit(terrain_surf, (int(world_to_screen(terrain_vx, cam_x)), 0))
+            screen.blit(terrain_surf, (int(world_to_screen(0, cam_x)), 0))
 
         # Mur gauche
         lw = int(world_to_screen(0, cam_x))
