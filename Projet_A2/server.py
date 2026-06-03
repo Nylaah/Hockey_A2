@@ -120,13 +120,16 @@ def broadcast_all(message: str):
 def _score_point(scorer: str):
     """Attribue un point au scorer et prépare le service suivant."""
     global scores, server_role, ball_flight, last_toucher
-    scores[scorer] += 1
-    server_role  = scorer   # le marqueur sert
-    last_toucher = None
-    ball_flight  = None
-    broadcast_all(f"SCORE {scores['LEFT']} {scores['RIGHT']}")
+    with game_lock:
+        scores[scorer] += 1
+        server_role  = scorer
+        last_toucher = None
+        ball_flight  = None
+        sl, sr = scores["LEFT"], scores["RIGHT"]
+    # broadcast HORS de game_lock
+    broadcast_all(f"SCORE {sl} {sr}")
     broadcast_all(f"SERVE_TURN {scorer}")
-    print(f"[SCORE] {scorer} marque → {scores['LEFT']}-{scores['RIGHT']}")
+    print(f"[SCORE] {scorer} marque → {sl}-{sr}")
 
 
 def ball_loop():
@@ -141,52 +144,66 @@ def ball_loop():
         dt  = now - last_t
         last_t = now
 
+        # ── Lire l'état sans tenir les locks trop longtemps ──
         with game_lock:
-            flight = ball_flight
-            if flight is None:
-                # Rappel toutes les secondes : le client a peut-être raté le premier envoi
-                remind_timer += dt
-                if remind_timer >= 1.0 and game_started:
-                    broadcast_all(f"SCORE {scores['LEFT']} {scores['RIGHT']}")
-                    broadcast_all(f"SERVE_TURN {server_role}")
+            flight       = ball_flight
+            cur_remind   = remind_timer
+            cur_started  = game_started
+
+        # ── Cas : pas de balle en jeu ──
+        if flight is None:
+            cur_remind += dt
+            if cur_remind >= 1.0 and cur_started:
+                with game_lock:
                     remind_timer = 0.0
-                continue
+                # broadcast HORS de game_lock pour éviter tout blocage
+                broadcast_all(f"SCORE {scores['LEFT']} {scores['RIGHT']}")
+                broadcast_all(f"SERVE_TURN {server_role}")
+                print(f"[REMIND] SERVE_TURN {server_role}")
+            else:
+                with game_lock:
+                    remind_timer = cur_remind
+            continue
+
+        # ── Balle en vol ──
+        with game_lock:
             remind_timer = 0.0
-
             flight.update(dt)
+            bx, by, bz = flight.x, flight.y, flight.z
+            btx, bty   = flight.tx, flight.ty
+            bprog      = flight.progress
+            bdone      = flight.done
+            bfrom      = flight.from_role
+            target_role = "RIGHT" if bfrom == "LEFT" else "LEFT"
+            pos_target  = player_pos.get(target_role)
 
-            # Diffuser l'état de la balle
-            broadcast_all(
-                f"BALL {flight.x:.1f} {flight.y:.1f} {flight.z:.1f} "
-                f"{flight.tx:.1f} {flight.ty:.1f} {flight.progress:.3f}"
-            )
+        # Diffuser l'état de la balle HORS game_lock
+        broadcast_all(
+            f"BALL {bx:.1f} {by:.1f} {bz:.1f} {btx:.1f} {bty:.1f} {bprog:.3f}"
+        )
 
-            # Joueur qui doit toucher = adversaire de from_role
-            target_role = "RIGHT" if flight.from_role == "LEFT" else "LEFT"
+        # Détection de touche
+        touched = False
+        if bz < BALL_TOUCH_Z and pos_target:
+            if math.hypot(pos_target["x"] - btx, pos_target["y"] - bty) < TOUCH_RADIUS:
+                touched = True
 
-            # Détection de touche : joueur proche de la cible ET balle basse
-            touched = False
-            if flight.z < BALL_TOUCH_Z and target_role in player_pos:
-                px = player_pos[target_role]["x"]
-                py = player_pos[target_role]["y"]
-                if math.hypot(px - flight.tx, py - flight.ty) < TOUCH_RADIUS:
-                    touched = True
-
-            if touched:
-                # Règle d'alternance : même joueur ne peut pas toucher deux fois
+        if touched:
+            with game_lock:
                 if last_toucher == target_role:
                     other = "LEFT" if target_role == "RIGHT" else "RIGHT"
-                    _score_point(other)
-                else:
+                    ball_flight = None
+                broadcast_all(f"BOUNCE {target_role}")
+            if last_toucher == target_role:
+                _score_point(other)
+            else:
+                with game_lock:
                     last_toucher = target_role
-                    sx, sy = flight.x, flight.y
-                    ball_flight = _launch(target_role, sx, sy)
-                    broadcast_all(f"BOUNCE {target_role}")
-                    print(f"[BOUNCE] {target_role} renvoie la balle")
+                    ball_flight  = _launch(target_role, bx, by)
+                print(f"[BOUNCE] {target_role} renvoie la balle")
 
-            elif flight.done:
-                # Balle tombée sans être touchée → point pour from_role
-                _score_point(flight.from_role)
+        elif bdone:
+            _score_point(bfrom)
 
 
 threading.Thread(target=ball_loop, daemon=True).start()

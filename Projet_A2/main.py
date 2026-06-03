@@ -603,13 +603,17 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
             screen.blit(serve_surf,
                         (WIDTH // 2 - serve_surf.get_width() // 2, HEIGHT // 2 - 20))
 
-        # Légende vitesses
+        # Légende vitesses + debug serve
         my_speed    = math.hypot(vx, vy)
         other_speed = math.hypot(other["vx"], other["vy"])
         me_lbl  = font_sm.render(f"● Toi        {my_speed:5.0f} px/s", True, my_color)
         adv_lbl = font_sm.render(f"● Adversaire {other_speed:5.0f} px/s", True, other_color)
-        screen.blit(me_lbl,  (10, HEIGHT - 46))
-        screen.blit(adv_lbl, (10, HEIGHT - 26))
+        dbg_lbl = font_sm.render(
+            f"serve={my_serve}  ball={'oui' if ball else 'non'}  score {score_left}-{score_right}",
+            True, (200, 200, 200))
+        screen.blit(me_lbl,  (10, HEIGHT - 66))
+        screen.blit(adv_lbl, (10, HEIGHT - 46))
+        screen.blit(dbg_lbl, (10, HEIGHT - 26))
 
         pygame.display.flip()
 
