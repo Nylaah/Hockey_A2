@@ -2,6 +2,9 @@ import socket
 import threading
 import signal
 import sys
+import math
+import random
+import time as _time
 
 
 def get_local_ip():
@@ -16,14 +19,81 @@ def get_local_ip():
     return ip
 
 
-HOST = get_local_ip()
-PORT = 5000
+HOST  = get_local_ip()
+PORT  = 5000
 
-clients      = {}     # conn -> username
-roles_map    = {}     # conn -> {"role": ..., "username": ...}
+# ── Dimensions (doivent correspondre à main.py) ──────────────────────────────
+VWIDTH  = 1480
+VHEIGHT = 600
+
+# ── Paramètres balle ─────────────────────────────────────────────────────────
+BALL_Z_MAX    = 220.0   # hauteur max de l'arc (unités arbitraires)
+BALL_TOUCH_Z  = 55.0    # z en dessous duquel on détecte la touche
+TOUCH_RADIUS  = 75      # distance joueur↔cible pour valider la touche
+MARGIN        = 110     # marge aux bords pour les cibles aléatoires
+
+# ── État global ──────────────────────────────────────────────────────────────
+clients      = {}   # conn -> username
+roles_map    = {}   # conn -> {"role": str}
 lock         = threading.Lock()
-game_started = False  # repassera à False quand les joueurs partent
+game_started = False
 
+# État du jeu (protégé par game_lock)
+game_lock    = threading.Lock()
+player_pos   = {}          # role -> {"x": float, "y": float}
+scores       = {"LEFT": 0, "RIGHT": 0}
+server_role  = "LEFT"      # qui sert prochain
+last_toucher = None        # dernier joueur ayant touché la balle
+ball_flight  = None        # BallFlight en cours ou None
+
+
+# ── Balle ────────────────────────────────────────────────────────────────────
+
+class BallFlight:
+    """Trajectoire parabolique d'une balle d'un point à un autre."""
+
+    def __init__(self, sx: float, sy: float, tx: float, ty: float,
+                 T: float, from_role: str):
+        self.sx = sx; self.sy = sy
+        self.tx = tx; self.ty = ty
+        self.T  = T
+        self.t  = 0.0
+        self.from_role = from_role
+        self.x = sx; self.y = sy; self.z = 0.0
+
+    def update(self, dt: float):
+        self.t = min(self.t + dt, self.T)
+        p       = self.t / self.T
+        self.x  = self.sx + (self.tx - self.sx) * p
+        self.y  = self.sy + (self.ty - self.sy) * p
+        self.z  = BALL_Z_MAX * math.sin(math.pi * p)
+
+    @property
+    def progress(self) -> float:
+        return self.t / self.T if self.T > 0 else 1.0
+
+    @property
+    def done(self) -> bool:
+        return self.t >= self.T
+
+
+def _random_target(from_role: str):
+    """Choisit une position aléatoire sur le terrain adverse."""
+    if from_role == "LEFT":
+        x = random.uniform(VWIDTH / 2 + MARGIN, VWIDTH - MARGIN)
+    else:
+        x = random.uniform(MARGIN, VWIDTH / 2 - MARGIN)
+    y = random.uniform(MARGIN, VHEIGHT - MARGIN)
+    return x, y
+
+
+def _launch(from_role: str, sx: float, sy: float) -> BallFlight:
+    tx, ty = _random_target(from_role)
+    T      = random.uniform(1.3, 2.2)
+    return BallFlight(sx, sy, tx, ty, T, from_role)
+
+
+# ── Réseau ───────────────────────────────────────────────────────────────────
 
 def send(conn, message: str):
     try:
@@ -33,7 +103,6 @@ def send(conn, message: str):
 
 
 def broadcast(message: str, sender_conn=None):
-    """Envoie à tous sauf l'expéditeur."""
     with lock:
         for conn in list(clients):
             if conn != sender_conn:
@@ -41,10 +110,102 @@ def broadcast(message: str, sender_conn=None):
 
 
 def broadcast_all(message: str):
-    """Envoie à tous les clients connectés."""
     with lock:
         for conn in list(clients):
             send(conn, message)
+
+
+# ── Logique de jeu ───────────────────────────────────────────────────────────
+
+def _score_point(scorer: str):
+    """Attribue un point au scorer et prépare le service suivant."""
+    global scores, server_role, ball_flight, last_toucher
+    scores[scorer] += 1
+    server_role  = scorer   # le marqueur sert
+    last_toucher = None
+    ball_flight  = None
+    broadcast_all(f"SCORE {scores['LEFT']} {scores['RIGHT']}")
+    broadcast_all(f"SERVE_TURN {scorer}")
+    print(f"[SCORE] {scorer} marque → {scores['LEFT']}-{scores['RIGHT']}")
+
+
+def ball_loop():
+    """Boucle ~30 fps : met à jour la balle et détecte les touches."""
+    global ball_flight, last_toucher
+    last_t = _time.time()
+
+    while True:
+        _time.sleep(1 / 30)
+        now = _time.time()
+        dt  = now - last_t
+        last_t = now
+
+        with game_lock:
+            flight = ball_flight
+            if flight is None:
+                continue
+
+            flight.update(dt)
+
+            # Diffuser l'état de la balle
+            broadcast_all(
+                f"BALL {flight.x:.1f} {flight.y:.1f} {flight.z:.1f} "
+                f"{flight.tx:.1f} {flight.ty:.1f} {flight.progress:.3f}"
+            )
+
+            # Joueur qui doit toucher = adversaire de from_role
+            target_role = "RIGHT" if flight.from_role == "LEFT" else "LEFT"
+
+            # Détection de touche : joueur proche de la cible ET balle basse
+            touched = False
+            if flight.z < BALL_TOUCH_Z and target_role in player_pos:
+                px = player_pos[target_role]["x"]
+                py = player_pos[target_role]["y"]
+                if math.hypot(px - flight.tx, py - flight.ty) < TOUCH_RADIUS:
+                    touched = True
+
+            if touched:
+                # Règle d'alternance : même joueur ne peut pas toucher deux fois
+                if last_toucher == target_role:
+                    other = "LEFT" if target_role == "RIGHT" else "RIGHT"
+                    _score_point(other)
+                else:
+                    last_toucher = target_role
+                    sx, sy = flight.x, flight.y
+                    ball_flight = _launch(target_role, sx, sy)
+                    broadcast_all(f"BOUNCE {target_role}")
+                    print(f"[BOUNCE] {target_role} renvoie la balle")
+
+            elif flight.done:
+                # Balle tombée sans être touchée → point pour from_role
+                _score_point(flight.from_role)
+
+
+threading.Thread(target=ball_loop, daemon=True).start()
+
+
+# ── Gestion des clients ──────────────────────────────────────────────────────
+
+def handle_serve(conn):
+    """Traite une demande de service d'un joueur."""
+    global ball_flight, last_toucher
+    with game_lock:
+        if ball_flight is not None:
+            return   # balle déjà en jeu
+        info = roles_map.get(conn)
+        if not info:
+            return
+        r = info["role"]
+        if r != server_role:
+            return   # pas son tour de servir
+        # Position de départ = position actuelle du serveur (ou défaut)
+        pos = player_pos.get(r, {})
+        sx  = pos.get("x", VWIDTH / 4 if r == "LEFT" else VWIDTH * 3 / 4)
+        sy  = pos.get("y", VHEIGHT / 2)
+        last_toucher = r
+        ball_flight  = _launch(r, sx, sy)
+        broadcast_all(f"SERVING {r}")
+        print(f"[SERVE] {r} sert")
 
 
 def handle_client(conn, addr):
@@ -52,7 +213,6 @@ def handle_client(conn, addr):
     username = None
 
     try:
-        # Format reçu : "username|ROLE_DESIRE\n"
         raw = conn.recv(1024).decode("utf-8").strip()
         if "|" in raw:
             username, desired_role = raw.split("|", 1)
@@ -68,36 +228,34 @@ def handle_client(conn, addr):
             if username in clients.values():
                 send(conn, "USERNAME_REFUSED Pseudo déjà utilisé")
                 return
-
             if len(clients) >= 2:
                 send(conn, "USERNAME_REFUSED Partie déjà pleine")
                 return
-
-            taken_roles = {meta["role"] for meta in roles_map.values()}
+            taken_roles = {m["role"] for m in roles_map.values()}
             if desired_role in ("LEFT", "RIGHT") and desired_role not in taken_roles:
                 role = desired_role
             elif "LEFT" not in taken_roles:
                 role = "LEFT"
             else:
                 role = "RIGHT"
-
             clients[conn]   = username
             roles_map[conn] = {"role": role, "username": username}
             current_count   = len(clients)
 
         send(conn, "USERNAME_ACCEPTED")
         send(conn, f"ROLE {role}")
-        print(f"[+] {username} connecté ({role}) depuis {addr}  [{current_count}/2]")
+        print(f"[+] {username} ({role}) depuis {addr}  [{current_count}/2]")
         broadcast(f"SERVER {username} a rejoint la partie", conn)
 
-        # Lancer la partie dès que 2 joueurs sont présents
         if current_count == 2 and not game_started:
             with lock:
                 game_started = True
-            print("[*] 2 joueurs connectés — GAME_START")
+            print("[*] GAME_START")
             broadcast_all("GAME_START")
+            broadcast_all(f"SCORE {scores['LEFT']} {scores['RIGHT']}")
+            broadcast_all(f"SERVE_TURN {server_role}")
 
-        # Boucle de lecture
+        # Boucle de lecture des messages
         buf = ""
         while True:
             data = conn.recv(4096)
@@ -109,9 +267,25 @@ def handle_client(conn, addr):
                 line = line.strip()
                 if not line:
                     continue
-                if not line.startswith("POS"):   # POS est trop fréquent à afficher
-                    print(f"[{username}] {line}")
-                broadcast(f"{username}: {line}", conn)
+
+                if line == "SERVE":
+                    handle_serve(conn)
+
+                elif line.startswith("POS"):
+                    # Mettre à jour la position connue du joueur côté serveur
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        with game_lock:
+                            player_pos[role] = {
+                                "x": float(parts[1]),
+                                "y": float(parts[2])
+                            }
+                    broadcast(f"{username}: {line}", conn)
+
+                else:
+                    if not line.startswith("POS"):
+                        print(f"[{username}] {line}")
+                    broadcast(f"{username}: {line}", conn)
 
     except (ConnectionResetError, OSError):
         pass
@@ -123,9 +297,10 @@ def handle_client(conn, addr):
                 roles_map.pop(conn, None)
                 remaining = len(clients)
                 print(f"[-] {username} déconnecté  [{remaining}/2]")
-                # Réinitialiser pour permettre une nouvelle partie
                 if remaining < 2:
                     game_started = False
+        with game_lock:
+            player_pos.pop(role if 'role' in dir() else "", None)
         broadcast(f"SERVER {username} a quitté la partie")
         try:
             conn.close()
@@ -133,7 +308,7 @@ def handle_client(conn, addr):
             pass
 
 
-# ── Arrêt propre (Ctrl+C ou signal TERM) ────────────────────────────────────
+# ── Arrêt propre ─────────────────────────────────────────────────────────────
 
 server_sock = None
 
@@ -152,7 +327,7 @@ def shutdown(sig=None, frame=None):
             server_sock.close()
         except Exception:
             pass
-    print("[!] Serveur arrêté proprement.")
+    print("[!] Serveur arrêté.")
     sys.exit(0)
 
 
@@ -166,14 +341,14 @@ server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server_sock.bind((HOST, PORT))
 server_sock.listen()
 print(f"Serveur en écoute sur {HOST}:{PORT}")
-print("Appuie sur Ctrl+C pour arrêter proprement.\n")
+print("Ctrl+C pour arrêter.\n")
 
 try:
     while True:
         try:
             conn, addr = server_sock.accept()
         except OSError:
-            break  # socket fermé par shutdown()
+            break
         threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
 except KeyboardInterrupt:
     shutdown()

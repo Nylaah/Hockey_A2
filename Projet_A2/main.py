@@ -282,15 +282,68 @@ def screen_wait(screen, clock, WIDTH, HEIGHT, username, role,
 # ─────────────────────────────────────────────
 
 COLLISION_RADIUS = 45   # rayon de collision (px)
+BALL_Z_MAX       = 220.0
+BALL_RADIUS      = 13   # rayon au sol
+BALL_MIN_SCALE   = 0.25 # taille minimale en hauteur de l'arc
+
+
+# ─────────────────────────────────────────────
+#  Rendu balle
+# ─────────────────────────────────────────────
+
+def draw_ball(screen, bx, by, bz, cam_x, HEIGHT):
+    """Balle avec ombre au sol et réduction de taille à l'apogée."""
+    sx = int(bx - cam_x)
+
+    # Facteur d'échelle selon la hauteur
+    t      = bz / BALL_Z_MAX if BALL_Z_MAX > 0 else 0
+    scale  = 1.0 - (1.0 - BALL_MIN_SCALE) * t
+    radius = max(2, int(BALL_RADIUS * scale))
+
+    # Décalage vertical (la balle remonte visuellement)
+    screen_y = int(by - bz * 0.45)
+
+    # Ombre : ellipse sombre au sol, s'estompe en hauteur
+    shadow_alpha = int(180 * (1 - t * 0.8))
+    sr = max(3, int(BALL_RADIUS * 0.7))
+    if -sr <= sx <= screen.get_width() + sr:
+        shadow_surf = pygame.Surface((sr * 2, max(1, sr // 2 * 2)), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow_surf, (0, 0, 0, shadow_alpha), shadow_surf.get_rect())
+        screen.blit(shadow_surf, (sx - sr, int(by) - sr // 2))
+
+    # Balle
+    if -radius <= sx <= screen.get_width() + radius:
+        pygame.draw.circle(screen, (255, 240, 80), (sx, screen_y), radius)
+        if radius > 4:
+            pygame.draw.circle(screen, (255, 255, 200),
+                               (sx - radius // 3, screen_y - radius // 3),
+                               max(1, radius // 3))
+
+
+def draw_landing_circle(screen, tx, ty, progress, cam_x):
+    """
+    Cercle jaune qui rétrécit à mesure que la balle approche.
+    progress : 0 = vient d'être lancée, 1 = impact.
+    """
+    MAX_R = 72
+    MIN_R = 14
+    r     = int(MAX_R - (MAX_R - MIN_R) * progress)
+    alpha = max(30, int(220 * (1 - progress * 0.6)))
+    sx    = int(tx - cam_x)
+    sy    = int(ty)
+
+    if -MAX_R <= sx <= screen.get_width() + MAX_R:
+        surf = pygame.Surface((r * 2 + 4, r * 2 + 4), pygame.SRCALPHA)
+        pygame.draw.circle(surf, (255, 230, 0, alpha), (r + 2, r + 2), r, 3)
+        screen.blit(surf, (sx - r - 2, sy - r - 2))
 
 
 def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
                 incoming, incoming_lock):
     """
-    Espace virtuel : 2 × WIDTH de large, HEIGHT de haut.
-    La caméra est centrée sur le triangle du joueur local.
-    Chaque joueur contrôle toujours son propre triangle.
-    Collision élastique locale basée sur la dernière vitesse connue de l'adversaire.
+    Espace virtuel : VWIDTH × HEIGHT.
+    Caméra centrée sur le joueur local.
+    Balle gérée par le serveur, rendue localement.
     """
     font_ui = pygame.font.SysFont("Arial", 18)
 
@@ -335,8 +388,15 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
 
     other: dict        = {"x": None, "y": None, "angle": 0.0, "vx": 0.0, "vy": 0.0}
     send_timer         = 0.0
-    hit_flash          = 0.0   # flash blanc sur collision
-    collision_cooldown = 0.0   # évite de re-déclencher immédiatement
+    hit_flash          = 0.0
+    collision_cooldown = 0.0
+
+    # ── État balle (reçu du serveur) ──
+    ball            = None   # dict x y z tx ty progress, ou None
+    score_left      = 0
+    score_right     = 0
+    my_serve        = False  # c'est mon tour de servir
+    serve_sent      = False  # j'ai déjà envoyé SERVE ce tour
 
     def world_to_screen(wx, cam_x):
         return wx - cam_x
@@ -356,19 +416,42 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
         for msg in msgs:
             content = msg.split(": ", 1)[1] if ": " in msg else msg
             parts   = content.split()
-            # Format : POS x y angle vx vy
-            if len(parts) >= 6 and parts[0] == "POS":
+            if not parts:
+                continue
+
+            if parts[0] == "POS" and len(parts) >= 6:
                 other["x"]     = float(parts[1])
                 other["y"]     = float(parts[2])
                 other["angle"] = float(parts[3])
                 other["vx"]    = float(parts[4])
                 other["vy"]    = float(parts[5])
-            # Impulsion envoyée par l'autre joueur quand il nous percute
-            elif len(parts) >= 3 and parts[0] == "IMPULSE":
+
+            elif parts[0] == "IMPULSE" and len(parts) >= 3:
                 vx += float(parts[1])
                 vy += float(parts[2])
-                hit_flash         = 0.15
+                hit_flash          = 0.15
                 collision_cooldown = 0.15
+
+            elif parts[0] == "BALL" and len(parts) >= 7:
+                ball = {
+                    "x": float(parts[1]), "y": float(parts[2]),
+                    "z": float(parts[3]),
+                    "tx": float(parts[4]), "ty": float(parts[5]),
+                    "progress": float(parts[6])
+                }
+
+            elif parts[0] == "SCORE" and len(parts) >= 3:
+                score_left  = int(parts[1])
+                score_right = int(parts[2])
+                ball        = None   # balle remise à zéro
+
+            elif parts[0] == "SERVE_TURN" and len(parts) >= 2:
+                my_serve   = (parts[1] == role)
+                serve_sent = False
+                ball       = None
+
+            elif parts[0] in ("SERVING", "BOUNCE"):
+                my_serve = False   # la balle est en jeu
 
         # ── Événements ──
         for event in pygame.event.get():
@@ -381,6 +464,11 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
             angle_control -= physics.TURN_SPEED * dt
         if keys[pygame.K_RIGHT]:
             angle_control += physics.TURN_SPEED * dt
+
+        # Servir la balle (espace)
+        if keys[pygame.K_SPACE] and my_serve and not serve_sent:
+            sock.sendall("SERVE\n".encode())
+            serve_sent = True
 
         x, y, vx, vy, _ = physics.update_physics(
             x, y, vx, vy, angle_control, bool(keys[pygame.K_UP]), dt
@@ -460,6 +548,11 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
         # Couleur de mon triangle (blanc pendant le flash de collision)
         tri_color = (255, 255, 255) if hit_flash > 0 else my_color
 
+        # Cercle d'atterrissage (derrière les joueurs)
+        if ball is not None:
+            draw_landing_circle(screen, ball["tx"], ball["ty"],
+                                ball["progress"], cam_x)
+
         draw_arrow(screen, world_to_screen(x, cam_x), y, angle_control, tri_color)
 
         if other["x"] is not None:
@@ -467,13 +560,38 @@ def screen_game(screen, clock, WIDTH, HEIGHT, sock, role,
                        world_to_screen(other["x"], cam_x),
                        other["y"], other["angle"], other_color)
 
-        # Légende + vitesses
+        # Balle (devant les joueurs)
+        if ball is not None:
+            draw_ball(screen, ball["x"], ball["y"], ball["z"], cam_x, HEIGHT)
+
+        # ── HUD ──
+        font_hud = pygame.font.SysFont("Arial", 22, bold=True)
+        font_sm  = pygame.font.SysFont("Arial", 17)
+
+        # Score
+        score_txt = font_hud.render(
+            f"{score_left}  —  {score_right}", True, (255, 255, 255))
+        screen.blit(score_txt, (WIDTH // 2 - score_txt.get_width() // 2, 8))
+
+        # Indication de service
+        if my_serve and not serve_sent:
+            serve_surf = font_hud.render("APPUIE SUR ESPACE POUR SERVIR",
+                                         True, my_color)
+            # Fond semi-transparent
+            bg = pygame.Surface((serve_surf.get_width() + 20, serve_surf.get_height() + 8),
+                                 pygame.SRCALPHA)
+            bg.fill((0, 0, 0, 140))
+            screen.blit(bg, (WIDTH // 2 - bg.get_width() // 2, HEIGHT // 2 - 24))
+            screen.blit(serve_surf,
+                        (WIDTH // 2 - serve_surf.get_width() // 2, HEIGHT // 2 - 20))
+
+        # Légende vitesses
         my_speed    = math.hypot(vx, vy)
         other_speed = math.hypot(other["vx"], other["vy"])
-        me_lbl  = font_ui.render(f"● Toi        {my_speed:5.0f} px/s", True, my_color)
-        adv_lbl = font_ui.render(f"● Adversaire {other_speed:5.0f} px/s", True, other_color)
-        screen.blit(me_lbl,  (10, HEIGHT - 50))
-        screen.blit(adv_lbl, (10, HEIGHT - 28))
+        me_lbl  = font_sm.render(f"● Toi        {my_speed:5.0f} px/s", True, my_color)
+        adv_lbl = font_sm.render(f"● Adversaire {other_speed:5.0f} px/s", True, other_color)
+        screen.blit(me_lbl,  (10, HEIGHT - 46))
+        screen.blit(adv_lbl, (10, HEIGHT - 26))
 
         pygame.display.flip()
 
