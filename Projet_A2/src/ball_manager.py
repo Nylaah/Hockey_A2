@@ -96,10 +96,15 @@ class BallManager:
     def serve(self, role: str, sx: float, sy: float) -> bool:
         """Lance la balle depuis (sx, sy). Retourne True si le service est valide."""
         with self._lock:
-            if self._flight is not None or role != self._server_role:
+            if self._flight is not None:
+                print(f"[SERVE] refusé — balle déjà en vol")
+                return False
+            if role != self._server_role:
+                print(f"[SERVE] refusé — {role} n'est pas le serveur ({self._server_role})")
                 return False
             self._last_touch = role
             self._flight     = self._new_flight(role, sx, sy)
+        print(f"[SERVE] {role} sert depuis ({sx:.0f}, {sy:.0f})")
         self._broadcast(f"SERVING {role}")
         return True
 
@@ -108,10 +113,16 @@ class BallManager:
     def _loop(self):
         last_t = time.time()
         while True:
+            try:
+                self._loop_tick(time.time() - last_t)
+            except Exception:
+                import traceback
+                print("[BALL_LOOP ERREUR]")
+                traceback.print_exc()
+            last_t = time.time()
             time.sleep(1 / 30)
-            now = time.time()
-            dt  = now - last_t
-            last_t = now
+
+    def _loop_tick(self, dt: float):
 
             # ── Snapshot sous lock ──
             with self._lock:
