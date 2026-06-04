@@ -170,8 +170,8 @@ class GameServer:
 
     # ── Démarrage du serveur ──────────────────────────────────────────────────
 
-    def run(self):
-        host = _get_local_ip()
+    def run(self, host: str | None = None):
+        host = host or _get_local_ip()
         self._server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server_sock.bind((host, PORT))

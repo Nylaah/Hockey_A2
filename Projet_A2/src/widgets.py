@@ -53,6 +53,10 @@ class Button:
         self.font     = font or pygame.font.SysFont("Arial", 20)
         self.selected = selected
 
+    @property
+    def hovered(self) -> bool:
+        return self.rect.collidepoint(pygame.mouse.get_pos())
+
     def handle_event(self, event: pygame.event.Event) -> bool:
         return (event.type == pygame.MOUSEBUTTONDOWN
                 and self.rect.collidepoint(event.pos))

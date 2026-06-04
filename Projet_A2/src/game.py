@@ -1,3 +1,4 @@
+import threading
 import pygame
 from .constants import WIDTH, HEIGHT, PORT
 from .network_client import NetworkClient
@@ -15,6 +16,7 @@ class Game:
         pygame.display.set_caption("Puck Master")
         clock  = pygame.time.Clock()
         client = NetworkClient()
+        ai     = None
 
         try:
             # ── Menu ──────────────────────────────────────────────────────────
@@ -22,6 +24,24 @@ class Game:
             if result is None:
                 return
             username, role, server_ip = result
+
+            # ── Mode solo : serveur embarqué + IA ─────────────────────────────
+            if server_ip == "solo":
+                from .game_server import GameServer
+                from .ai_client   import AIClient
+
+                server = GameServer()
+                threading.Thread(
+                    target=server.run,
+                    kwargs={"host": "127.0.0.1"},
+                    daemon=True,
+                ).start()
+
+                ai_role = "RIGHT" if role == "LEFT" else "LEFT"
+                ai = AIClient(role=ai_role, username="IA")
+                threading.Thread(target=ai.start, daemon=True).start()
+
+                server_ip = "127.0.0.1"
 
             # ── Connexion TCP ─────────────────────────────────────────────────
             pygame.display.set_caption(f"Puck Master — {username}")
@@ -37,7 +57,7 @@ class Game:
 
             pygame.display.set_caption(f"Puck Master — {username} ({assigned_role})")
 
-            # ── Attente du 2e joueur ──────────────────────────────────────────
+            # ── Attente du 2e joueur (sautée en solo car l'IA rejoint seule) ──
             if not WaitScreen(screen, clock, username, assigned_role, client).run():
                 return
 
@@ -45,6 +65,8 @@ class Game:
             GameScreen(screen, clock, assigned_role, client).run()
 
         finally:
+            if ai:
+                ai.stop()
             client.disconnect()
             pygame.quit()
 
