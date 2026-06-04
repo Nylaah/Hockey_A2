@@ -7,23 +7,47 @@ from .constants import (VWIDTH, HEIGHT, TOUCH_RADIUS,
 
 
 class _BallFlight:
-    def __init__(self, sx, sy, tx, ty, T, from_role):
-        self.sx = sx; self.sy = sy
-        self.tx = tx; self.ty = ty
+    """
+    Trajectoire en deux arcs avec un rebond :
+      arc 1 : départ → point de rebond  (55 % du temps, arc plein)
+      arc 2 : rebond  → cible finale    (45 % du temps, arc 50 % moins haut)
+    """
+
+    BOUNCE_RATIO = 0.55   # fraction du temps total consacrée au 1er arc
+
+    def __init__(self, sx, sy, bx, by, tx, ty, T, from_role):
+        self.sx = sx; self.sy = sy   # départ
+        self.bx = bx; self.by = by   # point de rebond
+        self.tx = tx; self.ty = ty   # cible finale
         self.T  = T;  self.t  = 0.0
         self.from_role = from_role
         self.x = sx; self.y = sy; self.z = 0.0
 
     def update(self, dt: float):
         self.t = min(self.t + dt, self.T)
-        p      = self.t / self.T
-        self.x = self.sx + (self.tx - self.sx) * p
-        self.y = self.sy + (self.ty - self.sy) * p
-        self.z = BALL_Z_MAX * math.sin(math.pi * p)
+        p  = self.t / self.T          # progression globale 0→1
+        br = self.BOUNCE_RATIO
+
+        if p <= br:
+            # Arc 1 : sx→bx
+            lp     = p / br
+            self.x = self.sx + (self.bx - self.sx) * lp
+            self.y = self.sy + (self.by - self.sy) * lp
+            self.z = BALL_Z_MAX * math.sin(math.pi * lp)
+        else:
+            # Arc 2 : bx→tx  (arc 50 % moins haut)
+            lp     = (p - br) / (1.0 - br)
+            self.x = self.bx + (self.tx - self.bx) * lp
+            self.y = self.by + (self.ty - self.by) * lp
+            self.z = BALL_Z_MAX * 0.5 * math.sin(math.pi * lp)
 
     @property
     def progress(self) -> float:
         return self.t / self.T if self.T > 0 else 1.0
+
+    @property
+    def in_phase2(self) -> bool:
+        return self.progress > self.BOUNCE_RATIO
 
     @property
     def done(self) -> bool:
@@ -111,14 +135,17 @@ class BallManager:
 
             # ── Mise à jour de la balle ──
             flight.update(dt)
+            # Format : BALL x y z tx ty progress bx by br
             self._broadcast(
                 f"BALL {flight.x:.1f} {flight.y:.1f} {flight.z:.1f} "
-                f"{flight.tx:.1f} {flight.ty:.1f} {flight.progress:.3f}"
+                f"{flight.tx:.1f} {flight.ty:.1f} {flight.progress:.3f} "
+                f"{flight.bx:.1f} {flight.by:.1f} {flight.BOUNCE_RATIO:.2f}"
             )
 
             target = "RIGHT" if flight.from_role == "LEFT" else "LEFT"
             pos    = positions.get(target)
             near   = (pos is not None
+                      and flight.in_phase2           # seulement après le rebond
                       and flight.z < BALL_TOUCH_Z
                       and math.hypot(pos["x"] - flight.tx,
                                      pos["y"] - flight.ty) < TOUCH_RADIUS)
@@ -152,10 +179,20 @@ class BallManager:
 
     @staticmethod
     def _new_flight(from_role: str, sx: float, sy: float) -> _BallFlight:
+        # Cible finale sur le terrain adverse
         if from_role == "LEFT":
             tx = random.uniform(VWIDTH / 2 + MARGIN, VWIDTH - MARGIN)
         else:
             tx = random.uniform(MARGIN, VWIDTH / 2 - MARGIN)
         ty = random.uniform(MARGIN, HEIGHT - MARGIN)
-        T  = random.uniform(1.3, 2.2)
-        return _BallFlight(sx, sy, tx, ty, T, from_role)
+
+        # Point de rebond : ~50-60 % du chemin vers la cible, avec variation
+        frac = random.uniform(0.48, 0.62)
+        bx   = sx + (tx - sx) * frac + random.uniform(-70, 70)
+        by   = sy + (ty - sy) * frac + random.uniform(-70, 70)
+        bx   = max(MARGIN // 2, min(VWIDTH - MARGIN // 2, bx))
+        by   = max(MARGIN // 2, min(HEIGHT - MARGIN // 2, by))
+
+        # Durée plus longue pour une balle plus lente
+        T = random.uniform(2.0, 3.0)
+        return _BallFlight(sx, sy, bx, by, tx, ty, T, from_role)

@@ -6,24 +6,31 @@ class Ball:
     """Balle côté client : reçoit son état du serveur et se dessine."""
 
     def __init__(self):
-        self.x        = 0.0
-        self.y        = 0.0
-        self.z        = 0.0   # hauteur au-dessus du sol
-        self.tx       = 0.0   # cible (point d'atterrissage)
-        self.ty       = 0.0
-        self.progress = 0.0   # 0 = départ, 1 = impact
-        self.active   = False
+        self.x            = 0.0
+        self.y            = 0.0
+        self.z            = 0.0
+        self.tx           = 0.0   # cible finale
+        self.ty           = 0.0
+        self.bx           = 0.0   # point de rebond
+        self.by           = 0.0
+        self.progress     = 0.0   # 0 = départ, 1 = impact final
+        self.bounce_ratio = 0.55  # fraction du temps pour le 1er arc
+        self.active       = False
 
     # ── Mise à jour ───────────────────────────────────────────────────────────
 
     def update_from_msg(self, parts: list[str]):
-        self.x        = float(parts[1])
-        self.y        = float(parts[2])
-        self.z        = float(parts[3])
-        self.tx       = float(parts[4])
-        self.ty       = float(parts[5])
-        self.progress = float(parts[6])
-        self.active   = True
+        # Format : BALL x y z tx ty progress bx by bounce_ratio
+        self.x            = float(parts[1])
+        self.y            = float(parts[2])
+        self.z            = float(parts[3])
+        self.tx           = float(parts[4])
+        self.ty           = float(parts[5])
+        self.progress     = float(parts[6])
+        self.bx           = float(parts[7])
+        self.by           = float(parts[8])
+        self.bounce_ratio = float(parts[9])
+        self.active       = True
 
     def deactivate(self):
         self.active = False
@@ -63,17 +70,35 @@ class Ball:
                                    max(1, radius // 3))
 
     def draw_landing_circle(self, surface: pygame.Surface, cam_x: float):
-        """Cercle jaune qui rétrécit à mesure que la balle approche."""
+        """
+        Dessine deux cercles :
+          - Cercle bleu clair : point de rebond (visible pendant le 1er arc)
+          - Cercle jaune      : cible finale (toujours visible, rétrécit jusqu'à l'impact)
+        """
         if not self.active:
             return
 
         MAX_R, MIN_R = 72, 14
-        r     = int(MAX_R - (MAX_R - MIN_R) * self.progress)
-        alpha = max(30, int(220 * (1 - self.progress * 0.6)))
-        sx    = int(self.tx - cam_x)
-        sy    = int(self.ty)
+        W = surface.get_width()
 
-        if -MAX_R <= sx <= surface.get_width() + MAX_R:
-            s = pygame.Surface((r * 2 + 4, r * 2 + 4), pygame.SRCALPHA)
-            pygame.draw.circle(s, (255, 230, 0, alpha), (r + 2, r + 2), r, 3)
-            surface.blit(s, (sx - r - 2, sy - r - 2))
+        # ── Cercle 1 : point de rebond (disparaît après le rebond) ──
+        if self.progress < self.bounce_ratio:
+            local_p = self.progress / self.bounce_ratio  # 0→1 dans la phase 1
+            r1    = int(MAX_R - (MAX_R - MIN_R) * local_p)
+            a1    = max(40, int(200 * (1 - local_p * 0.5)))
+            sx1   = int(self.bx - cam_x)
+            sy1   = int(self.by)
+            if -MAX_R <= sx1 <= W + MAX_R:
+                s = pygame.Surface((r1*2+4, r1*2+4), pygame.SRCALPHA)
+                pygame.draw.circle(s, (160, 210, 255, a1), (r1+2, r1+2), r1, 3)
+                surface.blit(s, (sx1 - r1 - 2, sy1 - r1 - 2))
+
+        # ── Cercle 2 : cible finale (jaune, rétrécit de 0 à 1) ──
+        r2  = int(MAX_R - (MAX_R - MIN_R) * self.progress)
+        a2  = max(30, int(220 * (1 - self.progress * 0.6)))
+        sx2 = int(self.tx - cam_x)
+        sy2 = int(self.ty)
+        if -MAX_R <= sx2 <= W + MAX_R:
+            s = pygame.Surface((r2*2+4, r2*2+4), pygame.SRCALPHA)
+            pygame.draw.circle(s, (255, 230, 0, a2), (r2+2, r2+2), r2, 3)
+            surface.blit(s, (sx2 - r2 - 2, sy2 - r2 - 2))

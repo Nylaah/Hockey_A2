@@ -76,7 +76,7 @@ class GameScreen:
             elif parts[0] == "IMPULSE" and len(parts) >= 3:
                 self._player.apply_impulse(float(parts[1]), float(parts[2]))
 
-            elif parts[0] == "BALL" and len(parts) >= 7:
+            elif parts[0] == "BALL" and len(parts) >= 10:
                 self._ball.update_from_msg(parts)
 
             elif parts[0] == "SCORE" and len(parts) >= 3:
