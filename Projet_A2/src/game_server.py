@@ -136,8 +136,9 @@ class GameServer:
             pass
         finally:
             with self._lock:
-                self._connections.pop(role, None)
-                self._usernames.pop(role, None)
+                if role is not None:
+                    self._connections.pop(role, None)
+                    self._usernames.pop(role, None)
                 remaining = len(self._connections)
                 if remaining < 2:
                     self._game_started = False

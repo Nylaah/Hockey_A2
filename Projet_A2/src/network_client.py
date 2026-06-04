@@ -46,6 +46,8 @@ class NetworkClient:
         buf = ""
         while self._running:
             try:
+                if self._sock is None:
+                    break
                 data = self._sock.recv(4096).decode("utf-8")
                 if not data:
                     break
