@@ -76,7 +76,9 @@ class GameScreen:
             elif parts[0] == "IMPULSE" and len(parts) >= 3:
                 self._player.apply_impulse(float(parts[1]), float(parts[2]))
 
-            elif parts[0] == "BALL" and len(parts) >= 10:
+            elif parts[0] == "BALL" and len(parts) >= 7:
+                if not self._ball.active:
+                    print(f"[CLIENT] Première BALL reçue ({len(parts)} champs)")
                 self._ball.update_from_msg(parts)
 
             elif parts[0] == "SCORE" and len(parts) >= 3:

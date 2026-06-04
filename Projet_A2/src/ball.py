@@ -20,17 +20,23 @@ class Ball:
     # ── Mise à jour ───────────────────────────────────────────────────────────
 
     def update_from_msg(self, parts: list[str]):
-        # Format : BALL x y z tx ty progress bx by bounce_ratio
-        self.x            = float(parts[1])
-        self.y            = float(parts[2])
-        self.z            = float(parts[3])
-        self.tx           = float(parts[4])
-        self.ty           = float(parts[5])
-        self.progress     = float(parts[6])
-        self.bx           = float(parts[7])
-        self.by           = float(parts[8])
-        self.bounce_ratio = float(parts[9])
-        self.active       = True
+        # Format : BALL x y z tx ty progress [bx by bounce_ratio]
+        self.x        = float(parts[1])
+        self.y        = float(parts[2])
+        self.z        = float(parts[3])
+        self.tx       = float(parts[4])
+        self.ty       = float(parts[5])
+        self.progress = float(parts[6])
+        if len(parts) >= 10:
+            self.bx           = float(parts[7])
+            self.by           = float(parts[8])
+            self.bounce_ratio = float(parts[9])
+        else:
+            # Pas de rebond (ancien format)
+            self.bx           = self.tx
+            self.by           = self.ty
+            self.bounce_ratio = 1.0   # jamais de 1er cercle
+        self.active = True
 
     def deactivate(self):
         self.active = False
