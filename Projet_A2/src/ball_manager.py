@@ -37,7 +37,7 @@ class _BallFlight:
             lp     = (p - br) / (1.0 - br)
             self.x = self.bx + (self.tx - self.bx) * lp
             self.y = self.by + (self.ty - self.by) * lp
-            self.z = BALL_Z_MAX * 0.5 * math.sin(math.pi * lp)
+            self.z = BALL_Z_MAX * 0.72 * math.sin(math.pi * lp)  # 72 % → 2e arc bien visible
 
     @property
     def progress(self) -> float:
@@ -196,5 +196,5 @@ class BallManager:
         bx   = max(MARGIN // 2, min(VWIDTH - MARGIN // 2, bx))
         by   = max(MARGIN // 2, min(HEIGHT - MARGIN // 2, by))
 
-        T = random.uniform(2.0, 3.0)
+        T = random.uniform(3.5, 5.0)   # balle plus lente
         return _BallFlight(sx, sy, bx, by, tx, ty, T, from_role)

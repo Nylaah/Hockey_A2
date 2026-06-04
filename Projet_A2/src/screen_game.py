@@ -144,6 +144,7 @@ class GameScreen:
 
             # Messages réseau
             self._process(self._client.get_messages())
+            self._ball.tick(dt)
 
             # Événements
             for event in pygame.event.get():
