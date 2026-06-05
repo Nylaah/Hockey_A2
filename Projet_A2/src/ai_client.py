@@ -30,16 +30,13 @@ class AIClient:
         self._angle = math.pi if role == "RIGHT" else 0.0
 
         # État balle (depuis messages serveur)
-        self._ball_active     = False
-        self._ball_progress   = 0.0
-        self._ball_bx         = 0.0
-        self._ball_by         = 0.0
-        self._ball_bx2        = 0.0
-        self._ball_by2        = 0.0
-        self._ball_tx         = 0.0
-        self._ball_ty         = 0.0
-        self._ball_br         = 0.5   # bounce_ratio
-        self._ball_br2        = 0.8   # bounce2_ratio
+        self._ball_active   = False
+        self._ball_progress = 0.0
+        self._ball_bx       = 0.0
+        self._ball_by       = 0.0
+        self._ball_tx       = 0.0
+        self._ball_ty       = 0.0
+        self._ball_br       = 0.5   # bounce_ratio
 
         # Service
         self._my_serve      = False
@@ -113,13 +110,9 @@ class AIClient:
                 self._ball_tx       = float(parts[4])
                 self._ball_ty       = float(parts[5])
                 if len(parts) >= 10:
-                    self._ball_bx  = float(parts[7])
-                    self._ball_by  = float(parts[8])
-                    self._ball_br  = float(parts[9])
-                if len(parts) >= 13:
-                    self._ball_bx2 = float(parts[10])
-                    self._ball_by2 = float(parts[11])
-                    self._ball_br2 = float(parts[12])
+                    self._ball_bx = float(parts[7])
+                    self._ball_by = float(parts[8])
+                    self._ball_br = float(parts[9])
 
         elif cmd in ("SCORE", "BOUNCE", "SERVING"):
             with self._lock:
@@ -171,24 +164,18 @@ class AIClient:
             active   = self._ball_active
             progress = self._ball_progress
             br       = self._ball_br
-            br2      = self._ball_br2
             bx       = self._ball_bx
             by       = self._ball_by
-            bx2      = self._ball_bx2
-            by2      = self._ball_by2
             tx       = self._ball_tx
             ty       = self._ball_ty
 
         if not active:
-            # Pas de balle : retour au centre de son côté
             home_x = VWIDTH * 3 / 4 if self._role == "RIGHT" else VWIDTH / 4
             return home_x, HEIGHT / 2
 
-        # Déterminer le cercle courant (même logique que touch_target côté serveur)
-        if progress > br2:
+        # Après le rebond → cible finale, sinon point de rebond
+        if progress > br:
             target_x, target_y = tx, ty
-        elif progress > br:
-            target_x, target_y = bx2, by2
         else:
             target_x, target_y = bx, by
 

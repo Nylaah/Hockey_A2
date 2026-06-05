@@ -6,24 +6,19 @@ class Ball:
     """Balle côté client : reçoit son état du serveur et se dessine."""
 
     def __init__(self):
-        self.x             = 0.0
-        self.y             = 0.0
-        self.z             = 0.0
-        self.tx            = 0.0
-        self.ty            = 0.0
-        self.bx            = 0.0   # rebond 1
-        self.by            = 0.0
-        self.bx2           = 0.0   # rebond 2
-        self.by2           = 0.0
-        self.progress      = 0.0
-        self.bounce_ratio  = 0.30
-        self.bounce2_ratio = 0.60
-        self.active        = False
+        self.x            = 0.0
+        self.y            = 0.0
+        self.z            = 0.0
+        self.tx           = 0.0
+        self.ty           = 0.0
+        self.bx           = 0.0
+        self.by           = 0.0
+        self.progress     = 0.0
+        self.bounce_ratio = 0.45
+        self.active       = False
 
-        self._bounce1_triggered = False
-        self._bounce1_flash     = 0.0
-        self._bounce2_triggered = False
-        self._bounce2_flash     = 0.0
+        self._bounce_triggered = False
+        self._bounce_flash     = 0.0
 
     # ── Mise à jour ───────────────────────────────────────────────────────────
 
@@ -41,38 +36,22 @@ class Ball:
             self.bounce_ratio = float(parts[9])
         else:
             self.bx = self.tx; self.by = self.ty; self.bounce_ratio = 1.0
-        if len(parts) >= 13:
-            self.bx2           = float(parts[10])
-            self.by2           = float(parts[11])
-            self.bounce2_ratio = float(parts[12])
-        else:
-            self.bx2 = self.tx; self.by2 = self.ty; self.bounce2_ratio = 1.0
         self.active = True
 
-        if (not self._bounce1_triggered
+        if (not self._bounce_triggered
                 and prev_progress < self.bounce_ratio
                 and self.progress >= self.bounce_ratio):
-            self._bounce1_triggered = True
-            self._bounce1_flash     = 0.5
-
-        if (not self._bounce2_triggered
-                and prev_progress < self.bounce2_ratio
-                and self.progress >= self.bounce2_ratio):
-            self._bounce2_triggered = True
-            self._bounce2_flash     = 0.5
+            self._bounce_triggered = True
+            self._bounce_flash     = 0.5
 
     def deactivate(self):
-        self.active              = False
-        self._bounce1_triggered  = False
-        self._bounce1_flash      = 0.0
-        self._bounce2_triggered  = False
-        self._bounce2_flash      = 0.0
+        self.active            = False
+        self._bounce_triggered = False
+        self._bounce_flash     = 0.0
 
     def tick(self, dt: float):
-        if self._bounce1_flash > 0:
-            self._bounce1_flash = max(0.0, self._bounce1_flash - dt)
-        if self._bounce2_flash > 0:
-            self._bounce2_flash = max(0.0, self._bounce2_flash - dt)
+        if self._bounce_flash > 0:
+            self._bounce_flash = max(0.0, self._bounce_flash - dt)
 
     # ── Rendu ─────────────────────────────────────────────────────────────────
 
@@ -93,21 +72,17 @@ class Ball:
 
         W = surface.get_width()
 
-        # ── Effets d'impact aux rebonds ──
-        for flash, bx_pt, by_pt in (
-            (self._bounce1_flash, self.bx,  self.by),
-            (self._bounce2_flash, self.bx2, self.by2),
-        ):
-            if flash > 0:
-                f   = flash / 0.5
-                r_f = int(6 + (1 - f) * 30)
-                a_f = int(220 * f)
-                bsx = int(bx_pt - cam_x)
-                bsy = int(by_pt)
-                if -40 <= bsx <= W + 40:
-                    fs = pygame.Surface((r_f*2+4, r_f*2+4), pygame.SRCALPHA)
-                    pygame.draw.circle(fs, (255, 255, 255, a_f), (r_f+2, r_f+2), r_f, 3)
-                    surface.blit(fs, (bsx - r_f - 2, bsy - r_f - 2))
+        # ── Effet d'impact au rebond ──
+        if self._bounce_flash > 0:
+            f   = self._bounce_flash / 0.5
+            r_f = int(6 + (1 - f) * 30)
+            a_f = int(220 * f)
+            bsx = int(self.bx - cam_x)
+            bsy = int(self.by)
+            if -40 <= bsx <= W + 40:
+                fs = pygame.Surface((r_f*2+4, r_f*2+4), pygame.SRCALPHA)
+                pygame.draw.circle(fs, (255, 255, 255, a_f), (r_f+2, r_f+2), r_f, 3)
+                surface.blit(fs, (bsx - r_f - 2, bsy - r_f - 2))
 
         # ── Ombre au sol ──
         shadow_alpha = int(160 * (1 - t * 0.8))
@@ -127,9 +102,8 @@ class Ball:
 
     def draw_landing_circle(self, surface: pygame.Surface, cam_x: float):
         """
-        Cercle bleu   → rebond 1  (pendant arc1).
-        Cercle vert   → rebond 2  (pendant arc1 et arc2).
-        Cercle jaune  → cible finale (toujours visible).
+        Cercle bleu  → point de rebond (visible pendant arc1).
+        Cercle jaune → cible finale   (toujours visible).
         """
         if not self.active:
             return
@@ -137,28 +111,22 @@ class Ball:
         MAX_R, MIN_R = 72, 14
         W = surface.get_width()
 
-        def draw_ring(bx, by, color, local_p):
-            r  = int(MAX_R - (MAX_R - MIN_R) * local_p)
-            a  = max(40, int(200 * (1 - local_p * 0.5)))
-            sx = int(bx - cam_x)
-            if -MAX_R <= sx <= W + MAX_R:
-                s = pygame.Surface((r*2+4, r*2+4), pygame.SRCALPHA)
-                pygame.draw.circle(s, (*color, a), (r+2, r+2), r, 3)
-                surface.blit(s, (sx-r-2, int(by)-r-2))
-
-        # Rebond 1 (bleu) : visible pendant arc1
+        # Rebond (bleu) : visible pendant arc1
         if self.progress < self.bounce_ratio:
-            draw_ring(self.bx, self.by, (160, 210, 255),
-                      self.progress / max(self.bounce_ratio, 1e-6))
+            local_p = self.progress / max(self.bounce_ratio, 1e-6)
+            r1  = int(MAX_R - (MAX_R - MIN_R) * local_p)
+            a1  = max(40, int(200 * (1 - local_p * 0.5)))
+            sx1 = int(self.bx - cam_x)
+            if -MAX_R <= sx1 <= W + MAX_R:
+                s = pygame.Surface((r1*2+4, r1*2+4), pygame.SRCALPHA)
+                pygame.draw.circle(s, (160, 210, 255, a1), (r1+2, r1+2), r1, 3)
+                surface.blit(s, (sx1-r1-2, int(self.by)-r1-2))
 
-        # Rebond 2 (vert) : visible pendant arc1 et arc2
-        if self.progress < self.bounce2_ratio:
-            span = self.bounce2_ratio - self.bounce_ratio
-            if self.progress < self.bounce_ratio:
-                local_p = self.progress / max(self.bounce2_ratio, 1e-6)
-            else:
-                local_p = (self.progress - self.bounce_ratio) / max(span, 1e-6)
-            draw_ring(self.bx2, self.by2, (100, 255, 160), local_p)
-
-        # Cible finale (jaune) : toujours visible
-        draw_ring(self.tx, self.ty, (255, 230, 0), self.progress)
+        # Cible finale (jaune)
+        r2  = int(MAX_R - (MAX_R - MIN_R) * self.progress)
+        a2  = max(30, int(220 * (1 - self.progress * 0.6)))
+        sx2 = int(self.tx - cam_x)
+        if -MAX_R <= sx2 <= W + MAX_R:
+            s = pygame.Surface((r2*2+4, r2*2+4), pygame.SRCALPHA)
+            pygame.draw.circle(s, (255, 230, 0, a2), (r2+2, r2+2), r2, 3)
+            surface.blit(s, (sx2-r2-2, int(self.ty)-r2-2))

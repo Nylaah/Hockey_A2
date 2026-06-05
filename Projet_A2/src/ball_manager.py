@@ -9,62 +9,45 @@ from .constants import (VWIDTH, HEIGHT, TOUCH_RADIUS,
 
 class _BallFlight:
     """
-    Trajectoire en 5 phases :
-      arc1   (0 → B1)           départ → rebond 1
-      dwell1 (B1 → B1+D)        balle au sol au rebond 1
-      arc2   (B1+D → B2)        rebond 1 → rebond 2
-      dwell2 (B2 → B2+D)        balle au sol au rebond 2
-      arc3   (B2+D → 1)         rebond 2 → cible finale
+    Trajectoire en 3 phases :
+      arc1  (0 → BOUNCE)           départ → rebond
+      dwell (BOUNCE → BOUNCE+DWELL) balle immobile au sol
+      arc2  (BOUNCE+DWELL → 1)     rebond → cible finale
     """
 
-    B1    = 0.28   # fin arc1
-    DWELL = 0.05   # durée de chaque dwell
-    B2    = 0.58   # fin arc2
+    BOUNCE = 0.45
+    DWELL  = 0.08
 
-    def __init__(self, sx, sy, bx, by, bx2, by2, tx, ty, T, from_role):
+    def __init__(self, sx, sy, bx, by, tx, ty, T, from_role):
         self.sx = sx; self.sy = sy
         self.bx = bx; self.by = by
-        self.bx2 = bx2; self.by2 = by2
         self.tx = tx; self.ty = ty
         self.T  = T;  self.t  = 0.0
         self.from_role = from_role
         self.x = sx; self.y = sy; self.z = 0.0
 
     def update(self, dt: float):
-        self.t = min(self.t + dt, self.T)
-        p      = self.t / self.T
-        b1     = self.B1
-        d1_end = b1 + self.DWELL
-        b2     = self.B2
-        d2_end = b2 + self.DWELL
+        self.t  = min(self.t + dt, self.T)
+        p       = self.t / self.T
+        b       = self.BOUNCE
+        d_end   = b + self.DWELL
 
-        if p <= b1:
-            lp     = p / b1
+        if p <= b:
+            lp     = p / b
             self.x = self.sx + (self.bx - self.sx) * lp
             self.y = self.sy + (self.by - self.sy) * lp
             self.z = BALL_Z_MAX * math.sin(math.pi * lp)
 
-        elif p <= d1_end:
+        elif p <= d_end:
             self.x = self.bx
             self.y = self.by
             self.z = 0.0
 
-        elif p <= b2:
-            lp     = (p - d1_end) / (b2 - d1_end)
-            self.x = self.bx  + (self.bx2 - self.bx)  * lp
-            self.y = self.by  + (self.by2 - self.by)  * lp
-            self.z = BALL_Z_MAX * 0.72 * math.sin(math.pi * lp)
-
-        elif p <= d2_end:
-            self.x = self.bx2
-            self.y = self.by2
-            self.z = 0.0
-
         else:
-            lp     = (p - d2_end) / (1.0 - d2_end)
-            self.x = self.bx2 + (self.tx - self.bx2) * lp
-            self.y = self.by2 + (self.ty - self.by2) * lp
-            self.z = BALL_Z_MAX * 0.50 * math.sin(math.pi * lp)
+            lp     = (p - d_end) / (1.0 - d_end)
+            self.x = self.bx + (self.tx - self.bx) * lp
+            self.y = self.by + (self.ty - self.by) * lp
+            self.z = BALL_Z_MAX * 0.70 * math.sin(math.pi * lp)
 
     @property
     def progress(self) -> float:
@@ -72,31 +55,14 @@ class _BallFlight:
 
     @property
     def bounce_ratio(self) -> float:
-        """Premier seuil de rebond envoyé au client."""
-        return self.B1
+        return self.BOUNCE
 
     @property
-    def bounce2_ratio(self) -> float:
-        return self.B2
-
-    @property
-    def in_arc2(self) -> bool:
-        p = self.progress
-        return self.B1 + self.DWELL < p <= self.B2
-
-    @property
-    def in_arc3(self) -> bool:
-        return self.progress > self.B2 + self.DWELL
-
-    @property
-    def in_touchable_phase(self) -> bool:
-        return self.in_arc2 or self.in_arc3
+    def in_phase2(self) -> bool:
+        return self.progress > self.BOUNCE + self.DWELL
 
     @property
     def touch_target(self) -> tuple[float, float]:
-        """Point de chute courant (rebond 2 ou cible finale)."""
-        if self.in_arc2:
-            return self.bx2, self.by2
         return self.tx, self.ty
 
     @property
@@ -192,21 +158,20 @@ class BallManager:
 
         # Mise à jour et broadcast
         flight.update(dt)
-        ttx, tty = flight.touch_target
         self._broadcast(
             f"BALL {flight.x:.1f} {flight.y:.1f} {flight.z:.1f} "
             f"{flight.tx:.1f} {flight.ty:.1f} {flight.progress:.3f} "
-            f"{flight.bx:.1f} {flight.by:.1f} {flight.bounce_ratio:.2f} "
-            f"{flight.bx2:.1f} {flight.by2:.1f} {flight.bounce2_ratio:.2f}"
+            f"{flight.bx:.1f} {flight.by:.1f} {flight.bounce_ratio:.2f}"
         )
 
         target = "RIGHT" if flight.from_role == "LEFT" else "LEFT"
         pos    = positions.get(target)
         near   = (
             pos is not None
-            and flight.in_touchable_phase
+            and flight.in_phase2
             and flight.z < BALL_TOUCH_Z
-            and math.hypot(pos["x"] - ttx, pos["y"] - tty) < TOUCH_RADIUS
+            and math.hypot(pos["x"] - flight.tx,
+                           pos["y"] - flight.ty) < TOUCH_RADIUS
         )
 
         if near:
@@ -243,19 +208,11 @@ class BallManager:
             tx = random.uniform(MARGIN, VWIDTH / 2 - MARGIN)
         ty = random.uniform(MARGIN, HEIGHT - MARGIN)
 
-        # Rebond 1 : entre départ et rebond 2
-        f1   = random.uniform(0.25, 0.40)
-        bx   = sx + (tx - sx) * f1 + random.uniform(-60, 60)
-        by   = sy + (ty - sy) * f1 + random.uniform(-60, 60)
+        frac = random.uniform(0.40, 0.60)
+        bx   = sx + (tx - sx) * frac + random.uniform(-70, 70)
+        by   = sy + (ty - sy) * frac + random.uniform(-70, 70)
         bx   = max(MARGIN // 2, min(VWIDTH - MARGIN // 2, bx))
         by   = max(MARGIN // 2, min(HEIGHT - MARGIN // 2, by))
 
-        # Rebond 2 : entre rebond 1 et cible finale
-        f2   = random.uniform(0.55, 0.70)
-        bx2  = bx + (tx - bx) * f2 + random.uniform(-50, 50)
-        by2  = by + (ty - by) * f2 + random.uniform(-50, 50)
-        bx2  = max(MARGIN // 2, min(VWIDTH - MARGIN // 2, bx2))
-        by2  = max(MARGIN // 2, min(HEIGHT - MARGIN // 2, by2))
-
-        T = random.uniform(3.5, 5.0)
-        return _BallFlight(sx, sy, bx, by, bx2, by2, tx, ty, T, from_role)
+        T = random.uniform(6.0, 8.5)   # balle lente
+        return _BallFlight(sx, sy, bx, by, tx, ty, T, from_role)
