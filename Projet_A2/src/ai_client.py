@@ -114,6 +114,11 @@ class AIClient:
                     self._ball_by = float(parts[8])
                     self._ball_br = float(parts[9])
 
+        elif cmd == "IMPULSE" and len(parts) >= 3:
+            with self._lock:
+                self._vx += float(parts[1])
+                self._vy += float(parts[2])
+
         elif cmd in ("SCORE", "BOUNCE", "SERVING"):
             with self._lock:
                 self._ball_active = False
