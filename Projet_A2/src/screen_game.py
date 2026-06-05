@@ -1,6 +1,7 @@
 import pygame
 import math
 import os
+import time
 from .constants import VWIDTH, HEIGHT, COLOR_LEFT, COLOR_RIGHT
 from .player import Player, OtherPlayer
 from .ball import Ball
@@ -28,6 +29,12 @@ class GameScreen:
         self._my_serve    = False
         self._serve_sent  = False
         self._send_timer  = 0.0
+
+        # Indicateur réseau : on mesure l'intervalle moyen entre messages reçus
+        # Le serveur envoie ~30 msg/s → intervalle idéal ≈ 33 ms
+        self._last_msg_t  = time.time()
+        self._avg_gap     = 0.033   # moyenne exponentielle (secondes)
+        self._net_bars    = 4       # 0-4 barres affichées
 
         # Polices créées une seule fois
         self._f_hud = pygame.font.SysFont("Arial", 22, bold=True)
@@ -80,6 +87,18 @@ class GameScreen:
                 if not self._ball.active:
                     print(f"[CLIENT] Première BALL reçue ({len(parts)} champs)")
                 self._ball.update_from_msg(parts)
+                # Mise à jour de l'indicateur réseau
+                now = time.time()
+                gap = now - self._last_msg_t
+                self._last_msg_t = now
+                # Moyenne exponentielle (α=0.15) pour lisser les pics
+                self._avg_gap = 0.85 * self._avg_gap + 0.15 * gap
+                # 4 barres : < 50 ms | 3 : < 110 ms | 2 : < 200 ms | 1 : < 400 ms
+                g_ms = self._avg_gap * 1000
+                self._net_bars = (4 if g_ms < 50 else
+                                  3 if g_ms < 110 else
+                                  2 if g_ms < 200 else
+                                  1 if g_ms < 400 else 0)
 
             elif parts[0] == "SCORE" and len(parts) >= 3:
                 self._score_left  = int(parts[1])
@@ -133,6 +152,33 @@ class GameScreen:
             f"● Adversaire {self._other.speed:5.0f} px/s",  True, self._other.color)
         self._screen.blit(me,  (10, H - 46))
         self._screen.blit(adv, (10, H - 26))
+
+        # Indicateur réseau (4 barres, coin supérieur droit)
+        self._draw_net_bars(W - 12, 10)
+
+    def _draw_net_bars(self, right_x: int, top_y: int):
+        """4 barres style signal Wi-Fi, alignées à droite."""
+        NB    = 4
+        W_BAR = 6
+        GAP   = 3
+        total_w = NB * W_BAR + (NB - 1) * GAP
+
+        colors = {4: (74, 222, 128),   # vert
+                  3: (163, 230, 53),   # vert-jaune
+                  2: (250, 204, 21),   # jaune
+                  1: (251, 146, 60),   # orange
+                  0: (248, 113, 113)}  # rouge
+        color_on  = colors.get(self._net_bars, (100, 100, 100))
+        color_off = (50, 60, 80)
+
+        x0 = right_x - total_w
+        for i in range(NB):
+            h   = 6 + i * 5          # hauteur croissante : 6, 11, 16, 21
+            bx  = x0 + i * (W_BAR + GAP)
+            by  = top_y + (21 - h)   # aligné par le bas
+            col = color_on if i < self._net_bars else color_off
+            pygame.draw.rect(self._screen, col,
+                             pygame.Rect(bx, by, W_BAR, h), border_radius=2)
 
     # ── Boucle principale ─────────────────────────────────────────────────────
 
