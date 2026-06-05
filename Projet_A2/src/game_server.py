@@ -192,8 +192,10 @@ class GameServer:
                     pass
             sys.exit(0)
 
-        signal.signal(signal.SIGINT,  _shutdown)
-        signal.signal(signal.SIGTERM, _shutdown)
+        # Les signaux ne peuvent être enregistrés que depuis le thread principal
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT,  _shutdown)
+            signal.signal(signal.SIGTERM, _shutdown)
 
         try:
             while True:
