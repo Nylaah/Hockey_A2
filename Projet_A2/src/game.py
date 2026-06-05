@@ -1,6 +1,6 @@
 import threading
 import pygame
-from .constants import WIDTH, HEIGHT, PORT
+from .constants import WIDTH, HEIGHT, PORT, GAME_MODE_1V1, GAME_MODE_2V2
 from .network_client import NetworkClient
 from .screen_menu import MenuScreen
 from .screen_wait import WaitScreen
@@ -16,37 +16,56 @@ class Game:
         pygame.display.set_caption("Puck Master")
         clock  = pygame.time.Clock()
         client = NetworkClient()
-        ai     = None
+        ais    = []
 
         try:
             # ── Menu ──────────────────────────────────────────────────────────
             result = MenuScreen(screen, clock).run()
             if result is None:
                 return
-            username, role, server_ip = result
+            username, team, server_ip, mode = result
 
-            # ── Mode solo : serveur embarqué + IA ─────────────────────────────
+            # ── Mode solo : serveur embarqué + IA(s) ──────────────────────────
             if server_ip == "solo":
                 from .game_server import GameServer
                 from .ai_client   import AIClient
 
-                server = GameServer()
+                server = GameServer(mode=mode)
                 threading.Thread(
                     target=server.run,
                     kwargs={"host": "127.0.0.1"},
                     daemon=True,
                 ).start()
 
-                ai_role = "RIGHT" if role == "LEFT" else "LEFT"
-                ai = AIClient(role=ai_role, username="IA")
-                threading.Thread(target=ai.start, daemon=True).start()
+                if mode == GAME_MODE_1V1:
+                    # 1 IA côté opposé
+                    ai_team = "RIGHT" if team == "LEFT" else "LEFT"
+                    ai = AIClient(role=ai_team, username="IA")
+                    threading.Thread(target=ai.start, daemon=True).start()
+                    ais.append(ai)
+                else:
+                    # 2v2 solo : 3 IA (RIGHT_1, RIGHT_2, LEFT_2 si humain = LEFT)
+                    # On envoie l'équipe souhaitée ; le serveur attribue le slot
+                    ai_configs = [
+                        ("RIGHT", "IA-R1"),
+                        ("RIGHT", "IA-R2"),
+                        ("LEFT",  "IA-L2"),
+                    ] if team == "LEFT" else [
+                        ("LEFT",  "IA-L1"),
+                        ("LEFT",  "IA-L2"),
+                        ("RIGHT", "IA-R2"),
+                    ]
+                    for ai_team_req, ai_name in ai_configs:
+                        ai = AIClient(role=ai_team_req, username=ai_name)
+                        threading.Thread(target=ai.start, daemon=True).start()
+                        ais.append(ai)
 
                 server_ip = "127.0.0.1"
 
             # ── Connexion TCP ─────────────────────────────────────────────────
             pygame.display.set_caption(f"Puck Master — {username}")
             try:
-                assigned_role = client.connect(server_ip, PORT, username, role)
+                assigned_role = client.connect(server_ip, PORT, username, team)
             except Exception as e:
                 self._show_error(screen, clock, f"Erreur de connexion : {e}")
                 return
@@ -57,15 +76,17 @@ class Game:
 
             pygame.display.set_caption(f"Puck Master — {username} ({assigned_role})")
 
-            # ── Attente du 2e joueur (sautée en solo car l'IA rejoint seule) ──
-            if not WaitScreen(screen, clock, username, assigned_role, client).run():
+            # ── Attente des autres joueurs ─────────────────────────────────────
+            max_players = 2 if mode == GAME_MODE_1V1 else 4
+            if not WaitScreen(screen, clock, username, assigned_role, client,
+                               mode=mode, max_players=max_players).run():
                 return
 
             # ── Jeu ───────────────────────────────────────────────────────────
             GameScreen(screen, clock, assigned_role, client).run()
 
         finally:
-            if ai:
+            for ai in ais:
                 ai.stop()
             client.disconnect()
             pygame.quit()
