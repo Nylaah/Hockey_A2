@@ -112,12 +112,34 @@ class OtherPlayer:
         self.vx    = 0.0
         self.vy    = 0.0
 
+        # Cible d'interpolation (position reçue du serveur)
+        self._tx: float | None = None
+        self._ty    = 0.0
+        self._tangle = 0.0
+
     def update_from_pos(self, parts: list[str]):
-        self.x     = float(parts[1])
-        self.y     = float(parts[2])
-        self.angle = float(parts[3])
-        self.vx    = float(parts[4])
-        self.vy    = float(parts[5])
+        """Mémorise la position cible ; l'interpolation se fait dans tick()."""
+        self._tx     = float(parts[1])
+        self._ty     = float(parts[2])
+        self._tangle = float(parts[3])
+        self.vx      = float(parts[4])
+        self.vy      = float(parts[5])
+        # Premier message : téléportation directe
+        if self.x is None:
+            self.x     = self._tx
+            self.y     = self._ty
+            self.angle = self._tangle
+
+    def tick(self, dt: float):
+        """Interpole vers la dernière position connue (~20 % par frame à 60 fps)."""
+        if self._tx is None or self.x is None:
+            return
+        alpha  = min(1.0, 18 * dt)   # facteur de lissage
+        self.x = self.x + (self._tx - self.x) * alpha
+        self.y = self.y + (self._ty - self.y) * alpha
+        # Interpolation angulaire par le chemin le plus court
+        delta  = (self._tangle - self.angle + math.pi) % (2 * math.pi) - math.pi
+        self.angle += delta * alpha
 
     def draw(self, surface: pygame.Surface, cam_x: float):
         if self.x is None:

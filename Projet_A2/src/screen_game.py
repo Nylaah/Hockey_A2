@@ -204,8 +204,9 @@ class GameScreen:
                 self._client.send("SERVE")
                 self._serve_sent = True
 
-            # Physique joueur
+            # Physique joueur + interpolation adversaire
             self._player.update(dt, keys)
+            self._other.tick(dt)
             self._player.check_collision(self._other, self._client)
 
             # Envoi de position (~30/s)

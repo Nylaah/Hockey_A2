@@ -24,6 +24,8 @@ class NetworkClient:
         self._sock.settimeout(5)
         self._sock.connect((server_ip, port))
         self._sock.settimeout(None)
+        # Envoi immédiat des paquets (pas de buffering Nagle)
+        self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
         self._running = True
         threading.Thread(target=self._recv_loop, daemon=True).start()

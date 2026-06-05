@@ -13,6 +13,9 @@ class ClientConnection:
     def __init__(self, conn: socket.socket, addr):
         self._conn  = conn
         self._addr  = addr
+        # Désactive l'algorithme de Nagle : les petits paquets (POS, BALL…)
+        # sont envoyés immédiatement sans attendre d'en accumuler d'autres.
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._queue: queue.Queue[str | None] = queue.Queue()
 
         self._send_thread = threading.Thread(target=self._send_loop, daemon=True)
