@@ -26,3 +26,7 @@ BALL_MIN_SCALE = 0.25
 TOUCH_RADIUS = 75
 BALL_TOUCH_Z = 55.0
 MARGIN       = 110
+
+# ── Modes de jeu ──────────────────────────────────────────────────────────────
+GAME_MODE_1V1 = "1v1"
+GAME_MODE_2V2 = "2v2"

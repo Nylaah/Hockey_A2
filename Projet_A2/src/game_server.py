@@ -2,7 +2,7 @@ import socket
 import threading
 import signal
 import sys
-from .constants import PORT
+from .constants import PORT, GAME_MODE_1V1, GAME_MODE_2V2
 from .connection import ClientConnection
 from .ball_manager import BallManager
 
@@ -18,10 +18,19 @@ def _get_local_ip() -> str:
         s.close()
 
 
+# Slots disponibles par mode
+_SLOTS_1V1 = ["LEFT", "RIGHT"]
+_SLOTS_2V2 = ["LEFT_1", "LEFT_2", "RIGHT_1", "RIGHT_2"]
+
+
 class GameServer:
     """Serveur de jeu : gère les connexions, le score et délègue la balle à BallManager."""
 
-    def __init__(self):
+    def __init__(self, mode: str = GAME_MODE_1V1):
+        self._mode          = mode
+        self._max_players   = 2 if mode == GAME_MODE_1V1 else 4
+        self._slots         = _SLOTS_1V1 if mode == GAME_MODE_1V1 else _SLOTS_2V2
+
         self._lock          = threading.Lock()
         self._connections: dict[str, ClientConnection] = {}   # role → conn
         self._usernames:   dict[str, str]              = {}   # role → username
@@ -49,6 +58,7 @@ class GameServer:
     # ── Score ─────────────────────────────────────────────────────────────────
 
     def _handle_score(self, scorer: str):
+        """scorer est une ÉQUIPE ('LEFT' ou 'RIGHT')."""
         with self._lock:
             self._scores[scorer] += 1
             sl, sr = self._scores["LEFT"], self._scores["RIGHT"]
@@ -88,17 +98,37 @@ class GameServer:
                 if username in self._usernames.values():
                     conn_obj.send("USERNAME_REFUSED Pseudo déjà utilisé")
                     return
-                if len(self._connections) >= 2:
+                if len(self._connections) >= self._max_players:
                     conn_obj.send("USERNAME_REFUSED Partie déjà pleine")
                     return
 
                 taken = set(self._connections.keys())
-                if desired in ("LEFT", "RIGHT") and desired not in taken:
-                    role = desired
-                elif "LEFT" not in taken:
-                    role = "LEFT"
+
+                if self._mode == GAME_MODE_1V1:
+                    # Logique 1v1 : desired = "LEFT" ou "RIGHT"
+                    if desired in ("LEFT", "RIGHT") and desired not in taken:
+                        role = desired
+                    elif "LEFT" not in taken:
+                        role = "LEFT"
+                    else:
+                        role = "RIGHT"
                 else:
-                    role = "RIGHT"
+                    # Logique 2v2 : desired = "LEFT" ou "RIGHT" (équipe souhaitée)
+                    role = None
+                    preferred_team = desired if desired in ("LEFT", "RIGHT") else None
+                    search_order = self._slots[:]
+                    if preferred_team:
+                        search_order = (
+                            [s for s in self._slots if s.startswith(preferred_team)]
+                            + [s for s in self._slots if not s.startswith(preferred_team)]
+                        )
+                    for slot in search_order:
+                        if slot not in taken:
+                            role = slot
+                            break
+                    if role is None:
+                        conn_obj.send("USERNAME_REFUSED Partie déjà pleine")
+                        return
 
                 self._connections[role] = conn_obj
                 self._usernames[role]   = username
@@ -106,10 +136,11 @@ class GameServer:
 
             conn_obj.send("USERNAME_ACCEPTED")
             conn_obj.send(f"ROLE {role}")
-            print(f"[+] {username} ({role}) [{count}/2]")
-            self._broadcast_except(f"SERVER {username} a rejoint", role)
+            max_p = self._max_players
+            print(f"[+] {username} ({role}) [{count}/{max_p}]")
+            self._broadcast_except(f"SERVER {username} a rejoint ({role})", role)
 
-            if count == 2 and not self._game_started:
+            if count >= self._max_players and not self._game_started:
                 with self._lock:
                     self._game_started = True
                     sl = self._scores["LEFT"]
@@ -117,7 +148,7 @@ class GameServer:
                 self._broadcast_all("GAME_START")
                 self._broadcast_all(f"SCORE {sl} {sr}")
                 self._ball.start_game()
-                print("[*] GAME_START — la partie commence")
+                print(f"[*] GAME_START — la partie commence ({self._mode})")
 
             # Boucle de messages
             while True:
@@ -140,12 +171,12 @@ class GameServer:
                     self._connections.pop(role, None)
                     self._usernames.pop(role, None)
                 remaining = len(self._connections)
-                if remaining < 2:
+                if remaining < self._max_players:
                     self._game_started = False
                     self._ball.stop_game()
             self._broadcast_all(f"SERVER {username} a quitté la partie")
             conn_obj.close()
-            print(f"[-] {username} déconnecté  [{remaining}/2]")
+            print(f"[-] {username} déconnecté  [{remaining}/{self._max_players}]")
 
     def _dispatch(self, line: str, role: str, username: str,
                   conn_obj: ClientConnection):
@@ -153,7 +184,7 @@ class GameServer:
         if line == "SERVE":
             with self._lock:
                 pos = self._ball._positions.get(role, {})
-            sx = pos.get("x", 370.0 if role == "LEFT" else 1110.0)
+            sx = pos.get("x", 370.0 if role.startswith("LEFT") else 1110.0)
             sy = pos.get("y", 300.0)
             self._ball.serve(role, sx, sy)
 
@@ -161,13 +192,19 @@ class GameServer:
             parts = line.split()
             if len(parts) >= 3:
                 self._ball.update_position(role, float(parts[1]), float(parts[2]))
-            # Transmettre à l'autre joueur
-            self._broadcast_except(f"{username}: {line}", role)
+            # Transmettre avec le rôle inclus pour identification côté client
+            if len(parts) >= 6:
+                self._broadcast_except(
+                    f"{role}: POS {parts[1]} {parts[2]} {parts[3]} {parts[4]} {parts[5]}",
+                    role
+                )
+            else:
+                self._broadcast_except(f"{role}: {line}", role)
 
         else:
             if not line.startswith("IMPULSE"):
                 print(f"[{username}] {line}")
-            self._broadcast_except(f"{username}: {line}", role)
+            self._broadcast_except(f"{role}: {line}", role)
 
     # ── Démarrage du serveur ──────────────────────────────────────────────────
 
@@ -177,7 +214,7 @@ class GameServer:
         self._server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server_sock.bind((host, PORT))
         self._server_sock.listen()
-        print(f"Serveur sur {host}:{PORT}  |  Ctrl+C pour arrêter\n")
+        print(f"Serveur sur {host}:{PORT}  mode={self._mode}  |  Ctrl+C pour arrêter\n")
 
         def _shutdown(sig=None, frame=None):
             print("\n[!] Arrêt du serveur...")

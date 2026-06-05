@@ -7,17 +7,26 @@ from .constants import (VWIDTH, HEIGHT, COLLISION_RADIUS,
                         COLOR_LEFT, COLOR_RIGHT)
 
 
+def _team_of(role: str) -> str:
+    return role.split("_")[0]
+
+
 class Player:
     """Triangle contrôlé localement."""
 
     def __init__(self, role: str):
         self.role  = role
-        self.color = COLOR_LEFT if role == "LEFT" else COLOR_RIGHT
-        self.x     = VWIDTH / 4         if role == "LEFT" else VWIDTH * 3 / 4
-        self.y     = HEIGHT / 2
+        team       = _team_of(role)
+        self.color = COLOR_LEFT if team == "LEFT" else COLOR_RIGHT
+
+        # Position de départ selon slot
+        is_left = (team == "LEFT")
+        is_2    = role.endswith("_2")
+        self.x     = VWIDTH / 4     if is_left else VWIDTH * 3 / 4
+        self.y     = HEIGHT / 2 + (60 if is_2 else -60 if role.endswith("_1") else 0)
         self.vx    = 0.0
         self.vy    = 0.0
-        self.angle = 0.0 if role == "LEFT" else math.pi
+        self.angle = 0.0 if is_left else math.pi
 
         self.hit_flash          = 0.0
         self.collision_cooldown = 0.0
@@ -51,26 +60,38 @@ class Player:
         if self.y < 0:          self.y = 0.0;           self.vy =  abs(self.vy)
         elif self.y > HEIGHT:   self.y = float(HEIGHT);  self.vy = -abs(self.vy)
 
-    def check_collision(self, other: "OtherPlayer", client):
-        """Détecte la collision avec l'adversaire et envoie l'impulsion."""
-        if other.x is None or self.collision_cooldown > 0:
+    def check_collision(self, others, client):
+        """Détecte la collision avec un ou plusieurs OtherPlayer et envoie l'impulsion.
+        others peut être un seul OtherPlayer ou une liste/itérable d'OtherPlayer.
+        """
+        if self.collision_cooldown > 0:
             return
-        dist = math.hypot(self.x - other.x, self.y - other.y)
-        if dist < COLLISION_RADIUS and dist > 0:
-            nx = (self.x - other.x) / dist
-            ny = (self.y - other.y) / dist
-            vrel_n = (self.vx - other.vx) * nx + (self.vy - other.vy) * ny
-            if vrel_n < 0:
-                j = -(1 + 1.5) / 2 * vrel_n   # e = 1.5 super-élastique
-                self.vx += j * nx
-                self.vy += j * ny
-                client.send(f"IMPULSE {-j*nx:.4f} {-j*ny:.4f}")
-                self.hit_flash          = 0.15
-                self.collision_cooldown = 0.15
-            # Séparation
-            overlap = COLLISION_RADIUS - dist
-            self.x += nx * overlap * 0.5
-            self.y += ny * overlap * 0.5
+        # Normalise en liste
+        if isinstance(others, OtherPlayer):
+            others_list = [others]
+        else:
+            others_list = list(others)
+
+        for other in others_list:
+            if other.x is None:
+                continue
+            dist = math.hypot(self.x - other.x, self.y - other.y)
+            if dist < COLLISION_RADIUS and dist > 0:
+                nx = (self.x - other.x) / dist
+                ny = (self.y - other.y) / dist
+                vrel_n = (self.vx - other.vx) * nx + (self.vy - other.vy) * ny
+                if vrel_n < 0:
+                    j = -(1 + 1.5) / 2 * vrel_n   # e = 1.5 super-élastique
+                    self.vx += j * nx
+                    self.vy += j * ny
+                    client.send(f"IMPULSE {-j*nx:.4f} {-j*ny:.4f}")
+                    self.hit_flash          = 0.15
+                    self.collision_cooldown = 0.15
+                # Séparation
+                overlap = COLLISION_RADIUS - dist
+                self.x += nx * overlap * 0.5
+                self.y += ny * overlap * 0.5
+                break  # une seule collision par frame
 
     def apply_impulse(self, dvx: float, dvy: float):
         self.vx += dvx
@@ -101,11 +122,12 @@ class Player:
 
 
 class OtherPlayer:
-    """Triangle de l'adversaire, reconstruit depuis les messages réseau."""
+    """Triangle d'un autre joueur, reconstruit depuis les messages réseau."""
 
     def __init__(self, role: str):
         self.role  = role
-        self.color = COLOR_LEFT if role == "LEFT" else COLOR_RIGHT
+        team       = _team_of(role)
+        self.color = COLOR_LEFT if team == "LEFT" else COLOR_RIGHT
         self.x: float | None = None
         self.y     = 0.0
         self.angle = 0.0

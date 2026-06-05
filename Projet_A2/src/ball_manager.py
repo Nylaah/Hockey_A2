@@ -7,6 +7,11 @@ from .constants import (VWIDTH, HEIGHT, TOUCH_RADIUS,
                         BALL_TOUCH_Z, MARGIN, BALL_Z_MAX)
 
 
+def team_of(role: str) -> str:
+    """Retourne l'équipe d'un rôle ('LEFT_1' → 'LEFT', 'RIGHT' → 'RIGHT')."""
+    return role.split("_")[0]
+
+
 class _BallFlight:
     """
     Trajectoire en 3 phases :
@@ -83,8 +88,8 @@ class BallManager:
         self._lock        = threading.Lock()
         self._flight: _BallFlight | None = None
         self._last_touch: str | None     = None
-        self._server_role: str           = "LEFT"
-        self._positions: dict            = {}
+        self._server_team: str           = "LEFT"   # équipe dont c'est le service
+        self._positions: dict            = {}        # role → {"x": float, "y": float}
         self._game_on: bool              = False
         self._remind_t: float            = 0.0
 
@@ -111,8 +116,8 @@ class BallManager:
             if self._flight is not None:
                 print(f"[SERVE] refusé — balle déjà en vol")
                 return False
-            if role != self._server_role:
-                print(f"[SERVE] refusé — {role} ≠ serveur ({self._server_role})")
+            if team_of(role) != self._server_team:
+                print(f"[SERVE] refusé — équipe {team_of(role)} ≠ serveur ({self._server_team})")
                 return False
             self._last_touch = role
             self._flight     = self._new_flight(role, sx, sy)
@@ -138,20 +143,20 @@ class BallManager:
     def _tick(self, dt: float):
         # Snapshot sous lock
         with self._lock:
-            flight     = self._flight
-            game_on    = self._game_on
-            remind_t   = self._remind_t
-            srv_role   = self._server_role
-            positions  = dict(self._positions)
-            last_touch = self._last_touch
+            flight      = self._flight
+            game_on     = self._game_on
+            remind_t    = self._remind_t
+            srv_team    = self._server_team
+            positions   = dict(self._positions)
+            last_touch  = self._last_touch
 
         # Pas de balle : rappel de service
         if flight is None:
             remind_t += dt
             if remind_t >= 1.0 and game_on:
-                self._broadcast(f"SERVE_TURN {srv_role}")
+                self._broadcast(f"SERVE_TURN {srv_team}")
                 remind_t = 0.0
-                print(f"[REMIND] SERVE_TURN {srv_role}")
+                print(f"[REMIND] SERVE_TURN {srv_team}")
             with self._lock:
                 self._remind_t = remind_t
             return
@@ -164,47 +169,58 @@ class BallManager:
             f"{flight.bx:.1f} {flight.by:.1f} {flight.bounce_ratio:.2f}"
         )
 
-        target = "RIGHT" if flight.from_role == "LEFT" else "LEFT"
-        pos    = positions.get(target)
-        # Touche valide : balle a rebondi, est basse, et le joueur est près
-        # de la position RÉELLE de la balle (pas de la cible).
-        near   = (
-            pos is not None
-            and flight.progress > flight.BOUNCE
+        from_team   = team_of(flight.from_role)
+        target_team = "RIGHT" if from_team == "LEFT" else "LEFT"
+
+        # Vérifie si un joueur de l'équipe cible touche la balle
+        near = (
+            flight.progress > flight.BOUNCE
             and flight.z < BALL_TOUCH_Z
-            and math.hypot(pos["x"] - flight.x,
-                           pos["y"] - flight.y) < TOUCH_RADIUS
+            and any(
+                math.hypot(pos["x"] - flight.x, pos["y"] - flight.y) < TOUCH_RADIUS
+                for key, pos in positions.items()
+                if team_of(key) == target_team
+            )
         )
 
         if near:
-            if last_touch == target:
-                other = "LEFT" if target == "RIGHT" else "RIGHT"
+            if last_touch is not None and team_of(last_touch) == target_team:
+                # Double touche → point pour l'équipe adverse
+                other_team = from_team
                 with self._lock:
                     self._flight      = None
                     self._last_touch  = None
-                    self._server_role = other
-                self._on_score(other)
+                    self._server_team = other_team
+                self._on_score(other_team)
             else:
-                new_f = self._new_flight(target, flight.x, flight.y)
+                # Touche valide → nouveau vol depuis la position actuelle
+                toucher_role = next(
+                    (k for k, pos in positions.items()
+                     if team_of(k) == target_team
+                     and math.hypot(pos["x"] - flight.x, pos["y"] - flight.y) < TOUCH_RADIUS),
+                    target_team  # fallback
+                )
+                new_f = self._new_flight(toucher_role, flight.x, flight.y)
                 with self._lock:
-                    self._last_touch = target
+                    self._last_touch = toucher_role
                     self._flight     = new_f
-                self._broadcast(f"BOUNCE {target}")
-                print(f"[BOUNCE] {target}")
+                self._broadcast(f"BOUNCE {target_team}")
+                print(f"[BOUNCE] {target_team}")
 
         elif flight.done:
-            scorer = flight.from_role
+            scorer_team = from_team
             with self._lock:
                 self._flight      = None
                 self._last_touch  = None
-                self._server_role = scorer
-            self._on_score(scorer)
+                self._server_team = scorer_team
+            self._on_score(scorer_team)
 
     # ── Utilitaire ────────────────────────────────────────────────────────────
 
     @staticmethod
     def _new_flight(from_role: str, sx: float, sy: float) -> _BallFlight:
-        if from_role == "LEFT":
+        from_team = team_of(from_role)
+        if from_team == "LEFT":
             tx = random.uniform(VWIDTH / 2 + MARGIN, VWIDTH - MARGIN)
         else:
             tx = random.uniform(MARGIN, VWIDTH / 2 - MARGIN)
