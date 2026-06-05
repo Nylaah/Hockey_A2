@@ -166,12 +166,14 @@ class BallManager:
 
         target = "RIGHT" if flight.from_role == "LEFT" else "LEFT"
         pos    = positions.get(target)
+        # Touche valide : balle a rebondi, est basse, et le joueur est près
+        # de la position RÉELLE de la balle (pas de la cible).
         near   = (
             pos is not None
-            and flight.in_phase2
+            and flight.progress > flight.BOUNCE
             and flight.z < BALL_TOUCH_Z
-            and math.hypot(pos["x"] - flight.tx,
-                           pos["y"] - flight.ty) < TOUCH_RADIUS
+            and math.hypot(pos["x"] - flight.x,
+                           pos["y"] - flight.y) < TOUCH_RADIUS
         )
 
         if near:
