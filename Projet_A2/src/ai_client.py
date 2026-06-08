@@ -71,7 +71,8 @@ class AIClient:
             return
 
         self._running = True
-        # Envoyer l'équipe souhaitée (LEFT ou RIGHT) ; le serveur attribue le slot
+        # Le mode sera déjà verrouillé par le joueur humain ; on envoie quand même
+        # l'équipe souhaitée. Le serveur ignorera le mode si déjà défini.
         self._send_raw(f"{self._username}|{self._team}\n")
 
         threading.Thread(target=self._recv_loop, daemon=True).start()

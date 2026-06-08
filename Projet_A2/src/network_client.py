@@ -15,7 +15,8 @@ class NetworkClient:
     # ── Connexion ─────────────────────────────────────────────────────────────
 
     def connect(self, server_ip: str, port: int,
-                username: str, role: str) -> str | None:
+                username: str, role: str,
+                mode: str = "1v1") -> str | None:
         """
         Se connecte au serveur, effectue le handshake.
         Retourne le rôle assigné par le serveur, ou None en cas d'échec.
@@ -30,8 +31,8 @@ class NetworkClient:
         self._running = True
         threading.Thread(target=self._recv_loop, daemon=True).start()
 
-        # Envoi du pseudo + rôle souhaité
-        self._sock.sendall(f"{username}|{role}\n".encode("utf-8"))
+        # Envoi du pseudo + rôle souhaité + mode de jeu
+        self._sock.sendall(f"{username}|{role}|{mode}\n".encode("utf-8"))
 
         response = self._wait_one(timeout=10)
         if response is None or response.startswith("USERNAME_REFUSED"):

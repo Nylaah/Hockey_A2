@@ -27,9 +27,10 @@ class GameServer:
     """Serveur de jeu : gère les connexions, le score et délègue la balle à BallManager."""
 
     def __init__(self, mode: str = GAME_MODE_1V1):
-        self._mode          = mode
+        self._mode          = mode          # peut changer au 1er handshake
         self._max_players   = 2 if mode == GAME_MODE_1V1 else 4
         self._slots         = _SLOTS_1V1 if mode == GAME_MODE_1V1 else _SLOTS_2V2
+        self._mode_locked   = False         # True dès qu'un client a défini le mode
 
         self._lock          = threading.Lock()
         self._connections: dict[str, ClientConnection] = {}   # role → conn
@@ -86,10 +87,12 @@ class GameServer:
             raw = raw.split("\n")[0].strip()
 
             if "|" in raw:
-                username, desired = raw.split("|", 1)
-                desired = desired.upper()
+                parts_hs = raw.split("|")
+                username = parts_hs[0]
+                desired  = parts_hs[1].upper() if len(parts_hs) > 1 else None
+                req_mode = parts_hs[2].lower() if len(parts_hs) > 2 else GAME_MODE_1V1
             else:
-                username, desired = raw, None
+                username, desired, req_mode = raw, None, GAME_MODE_1V1
 
             if not username:
                 conn_obj.send("USERNAME_REFUSED Pseudo vide")
@@ -97,6 +100,13 @@ class GameServer:
 
             # Attribution du rôle
             with self._lock:
+                # Le premier client fixe le mode pour toute la partie
+                if not self._mode_locked:
+                    self._mode        = req_mode
+                    self._max_players = 2 if req_mode == GAME_MODE_1V1 else 4
+                    self._slots       = _SLOTS_1V1 if req_mode == GAME_MODE_1V1 else _SLOTS_2V2
+                    self._mode_locked = True
+                    print(f"[MODE] fixé à {self._mode} par {username}")
                 if username in self._usernames.values():
                     conn_obj.send("USERNAME_REFUSED Pseudo déjà utilisé")
                     return

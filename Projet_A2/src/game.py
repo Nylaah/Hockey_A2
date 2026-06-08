@@ -43,7 +43,7 @@ class Game:
             # ── Connexion TCP ─────────────────────────────────────────────────
             pygame.display.set_caption(f"Puck Master — {username}")
             try:
-                assigned_role = client.connect(server_ip, PORT, username, team)
+                assigned_role = client.connect(server_ip, PORT, username, team, mode)
             except Exception as e:
                 self._show_error(screen, clock, f"Erreur de connexion : {e}")
                 return
