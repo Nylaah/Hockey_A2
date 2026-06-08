@@ -153,12 +153,6 @@ class GameServer:
             print(f"[+] {username} ({role}) [{count}/{max_p}]")
             self._broadcast_except(f"SERVER {username} a rejoint ({role})", role)
 
-            # En 2v2 : lancer un timer de 4 s après chaque nouvelle connexion.
-            # Si la partie n'est toujours pas pleine à l'expiration → auto-fill.
-            if self._mode != "1v1" and not self._game_started:
-                threading.Thread(target=self._autofill_after_delay,
-                                 args=(4.0,), daemon=True).start()
-
             if count >= self._max_players and not self._game_started:
                 with self._lock:
                     self._game_started = True
@@ -235,21 +229,6 @@ class GameServer:
         else:
             print(f"[{username}] {line}")
             self._broadcast_except(f"{role}: {line}", role)
-
-    def _autofill_after_delay(self, delay: float):
-        """Attend `delay` secondes puis remplit les slots vides si la partie n'a pas démarré."""
-        import time
-        time.sleep(delay)
-        with self._lock:
-            started   = self._game_started
-            count     = len(self._connections)
-            already   = self._fill_done
-            if not started and not already and count < self._max_players:
-                self._fill_done = True   # verrouiller avant de sortir du lock
-            else:
-                return                   # un autre timer a déjà géré ça
-        print(f"[AUTOFILL] {delay}s écoulées, {count}/{self._max_players} → remplissage IA")
-        self._fill_with_ai()
 
     def _fill_with_ai(self):
         """Remplit les slots vides avec des bots IA (fonctionne en solo et en ligne)."""
