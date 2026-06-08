@@ -142,6 +142,16 @@ class GameServer:
             print(f"[+] {username} ({role}) [{count}/{max_p}]")
             self._broadcast_except(f"SERVER {username} a rejoint ({role})", role)
 
+            # En 2v2 : dès que chaque équipe a au moins 1 humain,
+            # remplir automatiquement les slots vides avec des bots.
+            if self._mode != "1v1" and not self._game_started:
+                with self._lock:
+                    roles_connected = set(self._connections.keys())
+                has_left  = any(r.startswith("LEFT")  for r in roles_connected)
+                has_right = any(r.startswith("RIGHT") for r in roles_connected)
+                if has_left and has_right and len(roles_connected) < self._max_players:
+                    threading.Thread(target=self._fill_with_ai, daemon=True).start()
+
             if count >= self._max_players and not self._game_started:
                 with self._lock:
                     self._game_started = True
