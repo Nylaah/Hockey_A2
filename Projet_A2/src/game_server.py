@@ -31,6 +31,7 @@ class GameServer:
         self._max_players   = 2 if mode == GAME_MODE_1V1 else 4
         self._slots         = _SLOTS_1V1 if mode == GAME_MODE_1V1 else _SLOTS_2V2
         self._mode_locked   = False         # True dès qu'un client a défini le mode
+        self._fill_done     = False         # True dès qu'un fill a été lancé
 
         self._lock          = threading.Lock()
         self._connections: dict[str, ClientConnection] = {}   # role → conn
@@ -191,6 +192,7 @@ class GameServer:
                 remaining = len(self._connections)
                 if remaining < self._max_players:
                     self._game_started = False
+                    self._fill_done    = False   # autoriser un nouveau fill
                     self._ball.stop_game()
             self._broadcast_all(f"SERVER {username} a quitté la partie")
             conn_obj.close()
@@ -235,11 +237,15 @@ class GameServer:
         import time
         time.sleep(delay)
         with self._lock:
-            started = self._game_started
-            count   = len(self._connections)
-        if not started and count < self._max_players:
-            print(f"[AUTOFILL] {delay}s écoulées, {count}/{self._max_players} joueurs → remplissage IA")
-            self._fill_with_ai()
+            started   = self._game_started
+            count     = len(self._connections)
+            already   = self._fill_done
+            if not started and not already and count < self._max_players:
+                self._fill_done = True   # verrouiller avant de sortir du lock
+            else:
+                return                   # un autre timer a déjà géré ça
+        print(f"[AUTOFILL] {delay}s écoulées, {count}/{self._max_players} → remplissage IA")
+        self._fill_with_ai()
 
     def _fill_with_ai(self):
         """Remplit les slots vides avec des bots IA (fonctionne en solo et en ligne)."""
