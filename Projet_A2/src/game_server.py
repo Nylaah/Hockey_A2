@@ -85,7 +85,7 @@ class GameServer:
                 if not chunk:
                     return
                 raw += chunk
-            raw = raw.split("\n")[0].strip()
+            raw = str(raw.split("\n")[0]).strip()
 
             if "|" in raw:
                 parts_hs = raw.split("|")

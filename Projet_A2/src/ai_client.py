@@ -93,6 +93,8 @@ class AIClient:
         """Reçoit les messages du serveur et les dispatche via _handle()."""
         while self._running:
             try:
+                if self._sock is None:
+                    break
                 data = self._sock.recv(4096).decode("utf-8")
                 if not data:
                     break
@@ -262,6 +264,7 @@ class AIClient:
     def _send_raw(self, raw: str):
         """Envoie la chaîne brute (avec son '\n') sur le socket."""
         try:
-            self._sock.sendall(raw.encode("utf-8"))
+            if self._sock is not None:
+                self._sock.sendall(raw.encode("utf-8"))
         except Exception:
             pass
