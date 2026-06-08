@@ -225,6 +225,10 @@ class GameServer:
             self._broadcast_except_team(f"{role}: {line}", team)
 
         elif line == "FILL_AI":
+            with self._lock:
+                if self._fill_done or self._game_started:
+                    return
+                self._fill_done = True
             print(f"[FILL_AI] demandé par {username}")
             threading.Thread(target=self._fill_with_ai, daemon=True).start()
 
@@ -271,12 +275,16 @@ class GameServer:
 
     def run(self, host: str | None = None):
         """Lance l'écoute TCP ; bloque jusqu'à Ctrl+C ou fermeture du socket."""
-        host = host or _get_local_ip()
+        display_ip = _get_local_ip()
+        # 0.0.0.0 : écoute sur toutes les interfaces (LAN + loopback)
+        # Les bots peuvent ainsi se connecter via 127.0.0.1 même quand le
+        # serveur est démarré sur une IP LAN.
+        bind_host = host or "0.0.0.0"
         self._server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._server_sock.bind((host, PORT))
+        self._server_sock.bind((bind_host, PORT))
         self._server_sock.listen()
-        print(f"Serveur sur {host}:{PORT}  mode={self._mode}  |  Ctrl+C pour arrêter\n")
+        print(f"Serveur sur {display_ip}:{PORT}  mode={self._mode}  |  Ctrl+C pour arrêter\n")
 
         def _shutdown(sig=None, frame=None):
             print("\n[!] Arrêt du serveur...")
