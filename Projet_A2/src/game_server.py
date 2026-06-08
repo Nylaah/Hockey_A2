@@ -192,19 +192,45 @@ class GameServer:
             parts = line.split()
             if len(parts) >= 3:
                 self._ball.update_position(role, float(parts[1]), float(parts[2]))
-            # Transmettre avec le rôle inclus pour identification côté client
             if len(parts) >= 6:
                 self._broadcast_except(
                     f"{role}: POS {parts[1]} {parts[2]} {parts[3]} {parts[4]} {parts[5]}",
                     role
                 )
-            else:
-                self._broadcast_except(f"{role}: {line}", role)
+
+        elif line.startswith("IMPULSE"):
+            # Envoyer uniquement au joueur touché : le premier adversaire proche
+            # (en pratique on broadcast à tous les adversaires, mais pas les coéquipiers)
+            team = role.split("_")[0]
+            self._broadcast_except_team(f"{role}: {line}", team)
+
+        elif line == "FILL_AI":
+            print(f"[FILL_AI] demandé par {username}")
+            threading.Thread(target=self._fill_with_ai, daemon=True).start()
 
         else:
-            if not line.startswith("IMPULSE"):
-                print(f"[{username}] {line}")
+            print(f"[{username}] {line}")
             self._broadcast_except(f"{role}: {line}", role)
+
+    def _fill_with_ai(self):
+        """Remplit les slots vides avec des bots IA (fonctionne en solo et en ligne)."""
+        from .ai_client import AIClient
+        with self._lock:
+            taken      = set(self._connections.keys())
+            empty_slots = [s for s in self._slots if s not in taken]
+
+        for i, slot in enumerate(empty_slots):
+            team = slot.split("_")[0] if "_" in slot else slot
+            ai   = AIClient(role=team, username=f"BOT{i+1}")
+            threading.Thread(target=ai.start, daemon=True).start()
+            print(f"[FILL_AI] BOT{i+1} → équipe {team}")
+
+    def _broadcast_except_team(self, msg: str, exclude_team: str):
+        """Envoie un message uniquement aux joueurs d'une autre équipe."""
+        with self._lock:
+            for r, conn in self._connections.items():
+                if r.split("_")[0] != exclude_team:
+                    conn.send(msg)
 
     # ── Démarrage du serveur ──────────────────────────────────────────────────
 

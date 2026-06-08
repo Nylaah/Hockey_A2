@@ -1,6 +1,7 @@
 import threading
+import time
 import pygame
-from .constants import WIDTH, HEIGHT, PORT, GAME_MODE_1V1, GAME_MODE_2V2
+from .constants import WIDTH, HEIGHT, PORT, GAME_MODE_1V1
 from .network_client import NetworkClient
 from .screen_menu import MenuScreen
 from .screen_wait import WaitScreen
@@ -16,7 +17,7 @@ class Game:
         pygame.display.set_caption("Puck Master")
         clock  = pygame.time.Clock()
         client = NetworkClient()
-        ais    = []
+        is_solo = False
 
         try:
             # ── Menu ──────────────────────────────────────────────────────────
@@ -25,42 +26,18 @@ class Game:
                 return
             username, team, server_ip, mode = result
 
-            # ── Mode solo : serveur embarqué + IA(s) ──────────────────────────
+            # ── Mode solo : serveur embarqué, les bots seront demandés via FILL_AI
             if server_ip == "solo":
                 from .game_server import GameServer
-                from .ai_client   import AIClient
-
                 server = GameServer(mode=mode)
                 threading.Thread(
                     target=server.run,
                     kwargs={"host": "127.0.0.1"},
                     daemon=True,
                 ).start()
-
-                if mode == GAME_MODE_1V1:
-                    # 1 IA côté opposé
-                    ai_team = "RIGHT" if team == "LEFT" else "LEFT"
-                    ai = AIClient(role=ai_team, username="IA")
-                    threading.Thread(target=ai.start, daemon=True).start()
-                    ais.append(ai)
-                else:
-                    # 2v2 solo : 3 IA (RIGHT_1, RIGHT_2, LEFT_2 si humain = LEFT)
-                    # On envoie l'équipe souhaitée ; le serveur attribue le slot
-                    ai_configs = [
-                        ("RIGHT", "IA-R1"),
-                        ("RIGHT", "IA-R2"),
-                        ("LEFT",  "IA-L2"),
-                    ] if team == "LEFT" else [
-                        ("LEFT",  "IA-L1"),
-                        ("LEFT",  "IA-L2"),
-                        ("RIGHT", "IA-R2"),
-                    ]
-                    for ai_team_req, ai_name in ai_configs:
-                        ai = AIClient(role=ai_team_req, username=ai_name)
-                        threading.Thread(target=ai.start, daemon=True).start()
-                        ais.append(ai)
-
+                time.sleep(0.25)   # laisser le serveur s'initialiser
                 server_ip = "127.0.0.1"
+                is_solo   = True
 
             # ── Connexion TCP ─────────────────────────────────────────────────
             pygame.display.set_caption(f"Puck Master — {username}")
@@ -76,18 +53,21 @@ class Game:
 
             pygame.display.set_caption(f"Puck Master — {username} ({assigned_role})")
 
+            # En solo, on remplit immédiatement les slots vides avec des bots
+            if is_solo:
+                client.send("FILL_AI")
+
             # ── Attente des autres joueurs ─────────────────────────────────────
             max_players = 2 if mode == GAME_MODE_1V1 else 4
             if not WaitScreen(screen, clock, username, assigned_role, client,
-                               mode=mode, max_players=max_players).run():
+                               mode=mode, max_players=max_players,
+                               is_solo=is_solo).run():
                 return
 
             # ── Jeu ───────────────────────────────────────────────────────────
             GameScreen(screen, clock, assigned_role, client).run()
 
         finally:
-            for ai in ais:
-                ai.stop()
             client.disconnect()
             pygame.quit()
 

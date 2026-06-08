@@ -111,10 +111,14 @@ class AIClient:
         cmd = parts[0]
 
         if cmd == "ROLE" and len(parts) >= 2:
-            # Le serveur nous assigne le slot exact ; mettre à jour _role
             with self._lock:
                 self._role = parts[1]
                 self._team = _team_of(self._role)
+                # Décaler le y de départ selon le slot pour éviter la superposition
+                if self._role.endswith("_1"):
+                    self._y = HEIGHT / 2 - 80
+                elif self._role.endswith("_2"):
+                    self._y = HEIGHT / 2 + 80
 
         elif cmd == "BALL" and len(parts) >= 7:
             with self._lock:
