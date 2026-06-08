@@ -15,6 +15,7 @@ class Player:
     """Triangle contrôlé localement."""
 
     def __init__(self, role: str):
+        """Initialise la position, la couleur et les variables de mouvement selon le rôle."""
         self.role  = role
         team       = _team_of(role)
         self.color = COLOR_LEFT if team == "LEFT" else COLOR_RIGHT
@@ -34,6 +35,7 @@ class Player:
     # ── Mise à jour ───────────────────────────────────────────────────────────
 
     def update(self, dt: float, keys):
+        """Lit les touches clavier, applique la physique et maintient le joueur dans le terrain."""
         self.hit_flash          = max(0.0, self.hit_flash - dt)
         self.collision_cooldown = max(0.0, self.collision_cooldown - dt)
 
@@ -94,6 +96,7 @@ class Player:
                 break  # une seule collision par frame
 
     def apply_impulse(self, dvx: float, dvy: float):
+        """Applique une impulsion reçue depuis le serveur (collision avec un adversaire)."""
         self.vx += dvx
         self.vy += dvy
         self.hit_flash          = 0.15
@@ -114,9 +117,11 @@ class Player:
 
     @property
     def speed(self) -> float:
+        """Norme de la vitesse en pixels par seconde."""
         return math.hypot(self.vx, self.vy)
 
     def pos_message(self) -> str:
+        """Retourne la chaîne POS à envoyer au serveur (position, angle, vitesse)."""
         return (f"POS {self.x:.1f} {self.y:.1f} "
                 f"{self.angle:.4f} {self.vx:.2f} {self.vy:.2f}")
 
@@ -125,6 +130,7 @@ class OtherPlayer:
     """Triangle d'un autre joueur, reconstruit depuis les messages réseau."""
 
     def __init__(self, role: str):
+        """Initialise la couleur selon l'équipe ; la position restera None jusqu'au premier message."""
         self.role  = role
         team       = _team_of(role)
         self.color = COLOR_LEFT if team == "LEFT" else COLOR_RIGHT
@@ -164,6 +170,7 @@ class OtherPlayer:
         self.angle += delta * alpha
 
     def draw(self, surface: pygame.Surface, cam_x: float):
+        """Dessine le triangle de l'adversaire (masqué si sa position n'est pas encore connue)."""
         if self.x is None:
             return
         sx = self.x - cam_x
@@ -175,4 +182,5 @@ class OtherPlayer:
 
     @property
     def speed(self) -> float:
+        """Norme de la vitesse en pixels par seconde."""
         return math.hypot(self.vx, self.vy)

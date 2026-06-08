@@ -6,6 +6,7 @@ class TextInput:
 
     def __init__(self, x: int, y: int, w: int, h: int,
                  placeholder: str = "", font: pygame.font.Font = None):
+        """Crée le champ à la position (x, y) avec la taille (w × h)."""
         self.rect        = pygame.Rect(x, y, w, h)
         self.placeholder = placeholder
         self.font        = font or pygame.font.SysFont("Arial", 20)
@@ -15,6 +16,7 @@ class TextInput:
         self._cursor_t   = 0.0
 
     def handle_event(self, event: pygame.event.Event):
+        """Active/désactive le champ au clic et gère la frappe clavier."""
         if event.type == pygame.MOUSEBUTTONDOWN:
             self.active = self.rect.collidepoint(event.pos)
         if event.type == pygame.KEYDOWN and self.active:
@@ -24,12 +26,14 @@ class TextInput:
                 self.text += event.unicode
 
     def update(self, dt: float):
+        """Fait clignoter le curseur toutes les 0,5 secondes."""
         self._cursor_t += dt
         if self._cursor_t >= 0.5:
             self._cursor_vis = not self._cursor_vis
             self._cursor_t   = 0.0
 
     def draw(self, surface: pygame.Surface):
+        """Dessine le fond, la bordure, le texte et le curseur clignotant."""
         border = (96, 165, 250) if self.active else (59, 100, 180)
         pygame.draw.rect(surface, (20, 35, 65), self.rect, border_radius=8)
         pygame.draw.rect(surface, border,       self.rect, 2, border_radius=8)
@@ -48,6 +52,7 @@ class Button:
 
     def __init__(self, x: int, y: int, w: int, h: int,
                  label: str, font: pygame.font.Font = None, selected: bool = False):
+        """Crée le bouton à la position (x, y) avec la taille (w × h)."""
         self.rect     = pygame.Rect(x, y, w, h)
         self.label    = label
         self.font     = font or pygame.font.SysFont("Arial", 20)
@@ -55,13 +60,16 @@ class Button:
 
     @property
     def hovered(self) -> bool:
+        """Retourne True si la souris survole le bouton."""
         return self.rect.collidepoint(pygame.mouse.get_pos())
 
     def handle_event(self, event: pygame.event.Event) -> bool:
+        """Retourne True si le bouton vient d'être cliqué."""
         return (event.type == pygame.MOUSEBUTTONDOWN
                 and self.rect.collidepoint(event.pos))
 
     def draw(self, surface: pygame.Surface, override_bg=None):
+        """Dessine le bouton avec sa couleur de fond, sa bordure et son label centré."""
         bg  = override_bg or ((37, 99, 235) if self.selected else (20, 35, 65))
         brd = (147, 197, 253) if self.selected else (59, 100, 180)
         pygame.draw.rect(surface, bg,  self.rect, border_radius=8)

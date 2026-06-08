@@ -11,6 +11,7 @@ class WaitScreen:
     def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock,
                  username: str, role: str, client: NetworkClient,
                  mode: str = "1v1", max_players: int = 2, is_solo: bool = False):
+        """Prépare l'écran d'attente avec les infos du joueur et le nombre de joueurs attendus."""
         self._screen      = screen
         self._clock       = clock
         self._username    = username

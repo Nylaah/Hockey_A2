@@ -7,6 +7,7 @@ class MenuScreen:
     """Écran de menu : saisie du pseudo, IP, mode de jeu et choix du côté."""
 
     def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock):
+        """Mémorise l'écran et l'horloge Pygame pour l'utiliser dans run()."""
         self._screen = screen
         self._clock  = clock
         self._W, self._H = screen.get_size()

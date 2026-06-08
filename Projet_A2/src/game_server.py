@@ -45,11 +45,13 @@ class GameServer:
     # ── Broadcast ─────────────────────────────────────────────────────────────
 
     def _broadcast_all(self, msg: str):
+        """Envoie un message à tous les joueurs connectés."""
         with self._lock:
             for conn in self._connections.values():
                 conn.send(msg)
 
     def _broadcast_except(self, msg: str, exclude_role: str):
+        """Envoie un message à tous les joueurs sauf celui dont le rôle est exclude_role."""
         with self._lock:
             for role, conn in self._connections.items():
                 if role != exclude_role:
@@ -235,6 +237,7 @@ class GameServer:
     # ── Démarrage du serveur ──────────────────────────────────────────────────
 
     def run(self, host: str | None = None):
+        """Lance l'écoute TCP ; bloque jusqu'à Ctrl+C ou fermeture du socket."""
         host = host or _get_local_ip()
         self._server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

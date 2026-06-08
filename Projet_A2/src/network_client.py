@@ -45,6 +45,7 @@ class NetworkClient:
     # ── Thread de réception ───────────────────────────────────────────────────
 
     def _recv_loop(self):
+        """Thread de réception : découpe le flux TCP en lignes et les empile dans _incoming."""
         buf = ""
         while self._running:
             try:
@@ -78,12 +79,14 @@ class NetworkClient:
             self._incoming[:0] = msgs
 
     def send(self, msg: str):
+        """Envoie un message au serveur (silencieux en cas d'erreur réseau)."""
         try:
             self._sock.sendall((msg + "\n").encode("utf-8"))
         except Exception:
             pass
 
     def disconnect(self):
+        """Coupe la connexion et arrête le thread de réception."""
         self._running = False
         if self._sock:
             try:

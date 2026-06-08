@@ -23,6 +23,7 @@ class Ball:
     # ── Mise à jour ───────────────────────────────────────────────────────────
 
     def update_from_msg(self, parts: list[str]):
+        """Met à jour la balle depuis un message BALL reçu du serveur."""
         prev_progress  = self.progress
         self.x         = float(parts[1])
         self.y         = float(parts[2])
@@ -45,11 +46,13 @@ class Ball:
             self._bounce_flash     = 0.5
 
     def deactivate(self):
+        """Masque la balle (après un point ou une remise en jeu)."""
         self.active            = False
         self._bounce_triggered = False
         self._bounce_flash     = 0.0
 
     def tick(self, dt: float):
+        """Diminue le minuteur de l'effet de flash au rebond."""
         if self._bounce_flash > 0:
             self._bounce_flash = max(0.0, self._bounce_flash - dt)
 

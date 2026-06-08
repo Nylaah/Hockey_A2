@@ -98,16 +98,19 @@ class BallManager:
     # ── API publique ──────────────────────────────────────────────────────────
 
     def start_game(self):
+        """Autorise la balle à être servie et remet à zéro le rappel de service."""
         with self._lock:
             self._game_on  = True
             self._remind_t = 0.0
 
     def stop_game(self):
+        """Interrompt le jeu et supprime la balle en cours de vol."""
         with self._lock:
             self._game_on = False
             self._flight  = None
 
     def update_position(self, role: str, x: float, y: float):
+        """Enregistre la dernière position connue d'un joueur (utilisée pour la détection de touche)."""
         with self._lock:
             self._positions[role] = {"x": x, "y": y}
 
@@ -128,6 +131,7 @@ class BallManager:
     # ── Boucle interne ────────────────────────────────────────────────────────
 
     def _loop(self):
+        """Thread interne : appelle _tick() à ~30 fps indéfiniment."""
         last_t = time.time()
         while True:
             time.sleep(1 / 30)
@@ -141,6 +145,7 @@ class BallManager:
                 traceback.print_exc()
 
     def _tick(self, dt: float):
+        """Avance la simulation d'un pas dt : déplace la balle, détecte les touches et les points."""
         # Snapshot sous lock
         with self._lock:
             flight      = self._flight

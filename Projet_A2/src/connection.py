@@ -22,6 +22,7 @@ class ClientConnection:
         self._send_thread.start()
 
     def _send_loop(self):
+        """Envoie en continu les messages de la file jusqu'à réception de None (arrêt)."""
         while True:
             try:
                 msg = self._queue.get(timeout=1.0)
@@ -38,9 +39,11 @@ class ClientConnection:
         self._queue.put(msg)
 
     def recv(self, size: int) -> bytes:
+        """Lit jusqu'à size octets depuis le socket (bloquant)."""
         return self._conn.recv(size)
 
     def close(self):
+        """Arrête le thread d'envoi et ferme le socket proprement."""
         self._queue.put(None)   # arrête le thread d'envoi
         try:
             self._conn.close()
@@ -49,4 +52,5 @@ class ClientConnection:
 
     @property
     def addr(self):
+        """Adresse IP et port du client connecté."""
         return self._addr

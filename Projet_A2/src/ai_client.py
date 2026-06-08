@@ -78,6 +78,7 @@ class AIClient:
         threading.Thread(target=self._game_loop, daemon=True).start()
 
     def stop(self):
+        """Stoppe les threads et ferme le socket."""
         self._running = False
         if self._sock:
             try:
@@ -88,6 +89,7 @@ class AIClient:
     # ── Réception ─────────────────────────────────────────────────────────────
 
     def _recv_loop(self):
+        """Reçoit les messages du serveur et les dispatche via _handle()."""
         while self._running:
             try:
                 data = self._sock.recv(4096).decode("utf-8")
@@ -103,6 +105,7 @@ class AIClient:
                 break
 
     def _handle(self, msg: str):
+        """Interprète un message du serveur et met à jour l'état interne du bot."""
         content = msg.split(": ", 1)[1] if ": " in msg else msg
         parts   = content.split()
         if not parts:
@@ -217,6 +220,7 @@ class AIClient:
         return home_x, HEIGHT / 2
 
     def _move_toward(self, tx: float, ty: float, dt: float):
+        """Déplace le bot vers la cible (tx, ty) en appliquant accélération, friction et limites."""
         dx = tx - self._x
         dy = ty - self._y
         dist = math.hypot(dx, dy)
@@ -251,9 +255,11 @@ class AIClient:
     # ── Réseau ────────────────────────────────────────────────────────────────
 
     def _send(self, msg: str):
+        """Ajoute le saut de ligne et envoie le message au serveur."""
         self._send_raw(msg + "\n")
 
     def _send_raw(self, raw: str):
+        """Envoie la chaîne brute (avec son '\n') sur le socket."""
         try:
             self._sock.sendall(raw.encode("utf-8"))
         except Exception:

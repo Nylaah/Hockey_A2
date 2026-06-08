@@ -12,6 +12,7 @@ class Game:
     """Orchestrateur principal du client de jeu."""
 
     def run(self):
+        """Lance l'application : menu → connexion → attente → jeu → déconnexion."""
         pygame.init()
         screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("Puck Master")

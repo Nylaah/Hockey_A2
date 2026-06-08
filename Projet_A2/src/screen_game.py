@@ -17,6 +17,7 @@ class GameScreen:
 
     def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock,
                  role: str, client: NetworkClient):
+        """Crée le joueur local, initialise le score et charge le terrain."""
         self._screen = screen
         self._clock  = clock
         self._role   = role
@@ -73,6 +74,7 @@ class GameScreen:
     # ── Traitement des messages réseau ────────────────────────────────────────
 
     def _get_or_create_other(self, role: str) -> OtherPlayer:
+        """Retourne l'OtherPlayer pour ce rôle, en le créant au premier appel."""
         if role not in self._others:
             self._others[role] = OtherPlayer(role)
         return self._others[role]
@@ -130,6 +132,7 @@ class GameScreen:
     # ── Rendu ─────────────────────────────────────────────────────────────────
 
     def _draw_world(self, cam_x: float):
+        """Dessine le fond, le terrain scrollable et les lignes de bord."""
         self._screen.fill(self._bg_color)
         if self._terrain_surf:
             self._screen.blit(self._terrain_surf, (int(-cam_x), 0))
@@ -197,6 +200,7 @@ class GameScreen:
     # ── Boucle principale ─────────────────────────────────────────────────────
 
     def run(self):
+        """Boucle principale : événements → physique → envoi réseau → rendu à 60 fps."""
         running = True
         while running:
             dt = self._clock.tick(60) / 1000.0
